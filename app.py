@@ -1,5 +1,5 @@
 """
-NewsieNest - AI News Analyzer for everyone (kids, students, aspirants, adults)
+Daily News Buddy - AI News Analyzer for everyone (kids, students, aspirants, adults)
 
 Features
 - Live news from BBC, The Hindu, Al Jazeera, Guardian, NPR, NDTV, Indian Express, TOI, HT
@@ -39,9 +39,8 @@ import requests
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
-import shutil, sys
-import streamlit.components.v1 as components
-from extras import inject_extra_css, fun_bg, mascot_strip
+
+
 def cfg(name, default=""):
     """Read a setting from Streamlit secrets first, then environment variables."""
     try:
@@ -54,9 +53,9 @@ def cfg(name, default=""):
 # ----------------------------------------------------------------------------
 # Config
 # ----------------------------------------------------------------------------
-APP_NAME = cfg("APP_NAME", "NewsieNest")  # change the name any time in Secrets: APP_NAME = "..."
+APP_NAME = cfg("APP_NAME", "Daily News Buddy")  # change the name any time in Secrets: APP_NAME = "..."
 DB_PATH = os.getenv("NEWSVERSE_DB", "data/newsverse.db")
-UA = {"User-Agent": "Mozilla/5.0 (NewsBuddy learning app)"}
+UA = {"User-Agent": "Mozilla/5.0 (DailyNewsBuddy learning app)"}
 esc = html.escape
 BROWSER_UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
                             "Chrome/124.0 Safari/537.36",
@@ -186,15 +185,22 @@ def using_pg():
 
 
 @st.cache_resource
-def _pg_pool():
+def _pg_pool(url=""):
     from psycopg2.pool import ThreadedConnectionPool
     return ThreadedConnectionPool(1, 6, cfg("DATABASE_URL"), connect_timeout=10)
 
 
-def _pg_run(sql, params=()):
+def _pg_schema_stmts():
+    return [t.strip().replace("INTEGER PRIMARY KEY AUTOINCREMENT", "SERIAL PRIMARY KEY")
+            for t in SCHEMA.split(";") if t.strip()]
+
+
+def _pg_run(sql, params=(), _heal=True):
     import psycopg2
+    import psycopg2.errors
     import psycopg2.extras
-    pool = _pg_pool()
+    pool = _pg_pool(cfg("DATABASE_URL"))
+    need_heal = False
     for attempt in (1, 2):
         con = pool.getconn()
         try:
@@ -208,17 +214,25 @@ def _pg_run(sql, params=()):
                 con.rollback()
             except Exception:
                 pass
+            if _heal and isinstance(e, psycopg2.errors.UndefinedTable):
+                need_heal = True  # a table is missing: create the schema, then retry once
+                break
             if attempt == 2 or not isinstance(e, (psycopg2.OperationalError, psycopg2.InterfaceError)):
                 raise
         finally:
             pool.putconn(con)
+    if need_heal:
+        for stmt in _pg_schema_stmts():
+            _pg_run(stmt, (), False)
+        return _pg_run(sql, params, False)
 
 
 @st.cache_resource
-def init_db():
+def init_db(url=""):
+    """Creates all tables. 'url' is only here so a changed DATABASE_URL re-runs this."""
     if using_pg():
-        for stmt in [t.strip() for t in SCHEMA.split(";") if t.strip()]:
-            _pg_run(stmt.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "SERIAL PRIMARY KEY"))
+        for stmt in _pg_schema_stmts():
+            _pg_run(stmt, (), False)
         return True
     os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
     with closing(sqlite3.connect(DB_PATH)) as con:
@@ -1937,9 +1951,6 @@ def auth_screen():
         login_chars(440)
     with right:
         st.markdown(f"### Welcome to {esc(APP_NAME)}")
-        if not using_pg():
-            st.info("ℹ️ Permanent storage is being set up, so accounts may reset for now. Guest mode always works.")
-        st.caption("Log in to save stories, earn XP and keep your streak. Guests get every feature too.")
         st.caption("Log in to save stories, earn XP and keep your streak. Guests get every feature too.")
         t1, t2, t3, t4 = st.tabs(["Log in", "Sign up", "Forgot password", "Explore"])
         with t1:
@@ -2610,7 +2621,7 @@ def health_check():
 
 def main():
     try:
-        init_db()
+        init_db(cfg("DATABASE_URL"))
     except Exception as e:
         st.error("The database could not be reached. Check DATABASE_URL in Secrets.")
         st.caption(f"{type(e).__name__}: {str(e)[:200]}")
@@ -2627,10 +2638,6 @@ def main():
     if "kids_set" in st.session_state:
         st.session_state.kids = st.session_state.pop("kids_set")
     inject_css(st.session_state.kids)
-        inject_css(st.session_state.kids)
-    inject_extra_css(st.session_state.kids)
-    fun_bg()
-    if "visit_logged" not in st.session_state:
     if "visit_logged" not in st.session_state:
         st.session_state.visit_logged = True
         log("visit")
