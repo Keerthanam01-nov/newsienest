@@ -38,7 +38,7 @@ from concurrent.futures import ThreadPoolExecutor
 import requests
 import pandas as pd
 import streamlit as st
-import streamlit.components.v1 as components
+import streamlit.components.v1 as components import boost import mascot_bot
 
 
 def cfg(name, default=""):
