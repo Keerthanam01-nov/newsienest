@@ -53,7 +53,7 @@ def cfg(name, default=""):
 # ----------------------------------------------------------------------------
 # Config
 # ----------------------------------------------------------------------------
-APP_VERSION = "v5-selfheal-db"
+APP_VERSION = "v6-grounded-chat"
 APP_NAME = cfg("APP_NAME", "NewsieNest")  # change the name any time in Secrets: APP_NAME = "..."
 DB_PATH = os.getenv("NEWSVERSE_DB", "data/newsverse.db")
 UA = {"User-Agent": "Mozilla/5.0 (NewsieNest learning app)"}
@@ -569,7 +569,7 @@ def gemini_models():
     return out
 
 
-def _gemini_once(model, system, msgs, max_tokens, attempts):
+def _gemini_once(model, system, msgs, max_tokens, attempts, search=False):
     """One model, short timeout, automatic retry on timeouts and busy-server errors."""
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
     headers = {"x-goog-api-key": cfg("GEMINI_API_KEY"), "content-type": "application/json"}
@@ -578,13 +578,23 @@ def _gemini_once(model, system, msgs, max_tokens, attempts):
                           "parts": [{"text": m["content"]}]} for m in msgs],
             "generationConfig": {"maxOutputTokens": max_tokens * 2, "temperature": 0.7,
                                  "thinkingConfig": {"thinkingBudget": 0}}}
+    if search:
+        body["tools"] = [{"google_search": {}}]  # live web search for current facts
     last = None
     for i in range(attempts):
         try:
             r = requests.post(url, headers=headers, json=body, timeout=(5, 20))
-            if r.status_code == 400 and "thinkingConfig" in body["generationConfig"]:
-                body["generationConfig"].pop("thinkingConfig")  # model may not accept thinkingConfig
-                r = requests.post(url, headers=headers, json=body, timeout=(5, 20))
+            if r.status_code == 400:  # this model may not accept thinkingConfig or search: drop them one by one
+                for k in ("thinkingConfig", "tools"):
+                    if k == "thinkingConfig" and "thinkingConfig" in body["generationConfig"]:
+                        body["generationConfig"].pop("thinkingConfig")
+                    elif k == "tools" and "tools" in body:
+                        body.pop("tools")
+                    else:
+                        continue
+                    r = requests.post(url, headers=headers, json=body, timeout=(5, 20))
+                    if r.status_code != 400:
+                        break
             if r.status_code in (429, 500, 502, 503, 504):
                 last = _api_error(r)
                 time.sleep(1.2)
@@ -601,7 +611,7 @@ def _gemini_once(model, system, msgs, max_tokens, attempts):
     raise last or RuntimeError("AI service did not answer")
 
 
-def _call_llm(system, msgs, max_tokens):
+def _call_llm(system, msgs, max_tokens, search=False):
     if cfg("ANTHROPIC_API_KEY"):
         r = requests.post(
             "https://api.anthropic.com/v1/messages",
@@ -615,23 +625,23 @@ def _call_llm(system, msgs, max_tokens):
     last = None
     for i, model in enumerate(gemini_models()[:5]):
         try:
-            return _gemini_once(model, system, msgs, max_tokens, 2 if i == 0 else 1)
+            return _gemini_once(model, system, msgs, max_tokens, 2 if i == 0 else 1, search)
         except Exception as e:  # retired model (404), blocked, busy... try the next one
             last = last or e
     raise last or RuntimeError("No Gemini model available")
 
 
 @st.cache_data(ttl=6 * 3600, show_spinner=False, max_entries=500)
-def _llm_cached(system, messages_json, max_tokens):
-    return _call_llm(system, json.loads(messages_json), max_tokens)
+def _llm_cached(system, messages_json, max_tokens, search=False):
+    return _call_llm(system, json.loads(messages_json), max_tokens, search)
 
 
-def llm(system, messages, max_tokens=700):
+def llm(system, messages, max_tokens=700, search=False):
     """Returns text, or None when AI is off / busy / call failed."""
     if not ai_on() or not ai_allowed():
         return None
     try:
-        out = _llm_cached(system, json.dumps(messages), max_tokens).strip()
+        out = _llm_cached(system, json.dumps(messages), max_tokens, search).strip()
         log("ai")
         st.session_state.pop("ai_err", None)
         return out
@@ -2255,23 +2265,31 @@ def page_news():
             st.rerun()
 
 
+STOPWORDS = set("what when where which whom whose about with from that this these those have will would could should "
+                "does done your yours their there then than them they into over under also just like some more most "
+                "tell please explain give show need know want make made rules rule".split())
+
+
 def keyword_answer(question):
-    words = {w for w in re.findall(r"[a-z]{4,}", question.lower())}
+    """Offline fallback. Only shows a story when it really matches the question; never a random headline."""
+    words = {w for w in re.findall(r"[a-z]{4,}", question.lower())} - STOPWORDS
     best, score = None, 0
     for a in st.session_state.get("articles", []):
         sc = len(words & set(re.findall(r"[a-z]{4,}", (a["title"] + " " + a["text"]).lower())))
         if sc > score:
             best, score = a, sc
-    if best:
-        return (f"I found this in today's stories:\n\n**{best['title']}**\n\n{short_summary(best, 300)}\n\n"
-                "_(Ask again in a moment for a fuller explanation.)_")
-    return ("I can look up word meanings (try: *define inflation*). " + ai_status())
+    if best and score >= 2 and score >= 0.5 * len(words):
+        return (f"I found a related story in today's news:\n\n**{best['title']}**\n\n{short_summary(best, 300)}")
+    why = f" (reason: {st.session_state.get('ai_err')})" if is_admin() and st.session_state.get("ai_err") else ""
+    return ("🦉 I couldn't reach my AI brain just now, so I won't guess. Please ask again in a few seconds. "
+            "For official rules, dates and results, also check the government or organisation's own website." + why)
 
 
 CHAT_KEYS = {"✨ Auto": "auto", "🎭 Cartoon": "cartoon", "🌍 Real life": "real", "🎮 Game": "game"}
 STYLE_ICON = {"auto": "📖", "cartoon": "🎭", "real": "🌍", "game": "🎮"}
 GROUND = ("You are Newsie, a friendly teacher-chatbot for readers in India. Explain accurately and kindly. "
-          "If you are not sure, say so and suggest a trusted source. You cannot browse the internet. "
+          "For current facts (results, dates, rules, prices) use web search when available and name the source site. "
+          "If you cannot confirm something, say so and point to the official website instead of guessing. "
           "Never ask for personal details. Politely steer away from adult or harmful topics.")
 
 
@@ -2356,7 +2374,7 @@ def newsie_answer(question, style):
     while msgs and msgs[0]["role"] != "user":
         msgs.pop(0)
     msgs.append({"role": "user", "content": f"{task}\nQuestion: {question}"})
-    out = llm(ctx, msgs, 600)
+    out = llm(ctx, msgs, 700, search=True)
     return {"content": out or keyword_answer(question)}
 
 
