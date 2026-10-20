@@ -1,5 +1,5 @@
 """
-NewsieNest - AI News Analyzer for everyone (kids, students, aspirants, adults)
+NewsieNest - AI News Analyzer for everyone (kids, students, adults)
 
 Features
 - Live news from BBC, The Hindu, Al Jazeera, Guardian, NPR, NDTV, Indian Express, TOI, HT
