@@ -53,6 +53,7 @@ def cfg(name, default=""):
 # ----------------------------------------------------------------------------
 # Config
 # ----------------------------------------------------------------------------
+APP_VERSION = "v5-selfheal-db"
 APP_NAME = cfg("APP_NAME", "Daily News Buddy")  # change the name any time in Secrets: APP_NAME = "..."
 DB_PATH = os.getenv("NEWSVERSE_DB", "data/newsverse.db")
 UA = {"User-Agent": "Mozilla/5.0 (DailyNewsBuddy learning app)"}
@@ -1943,6 +1944,7 @@ def sidebar():
                 st.markdown(f"{ok} **{name}**  \n<small>{esc(detail)}</small>", unsafe_allow_html=True)
         st.divider()
         st.caption("Credibility and sentiment are quick hints, not facts. Always open the source.")
+        st.caption(f"App version: {APP_VERSION}")
 
 
 def auth_screen():
