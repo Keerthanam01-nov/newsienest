@@ -1,12 +1,9 @@
-# Put this file in GitHub at:  .streamlit/config.toml
-# Forces ONE dark theme for every visitor, so every widget is readable.
 [theme]
 base = "dark"
 primaryColor = "#FF5C5C"
 backgroundColor = "#0E1020"
-secondaryBackgroundColor = "#1A1D33"
+secondaryBackgroundColor = "#171A30"
 textColor = "#F2F3FA"
-font = "sans serif"
 
-[client]
-toolbarMode = "viewer"
+[server]
+enableXsrfProtection = true
