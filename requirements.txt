@@ -1,7 +1,7 @@
-streamlit>=1.50
+streamlit>=1.40
 requests
 pandas
 vaderSentiment
-deep-translator
 gTTS
+deep-translator
 psycopg2-binary
