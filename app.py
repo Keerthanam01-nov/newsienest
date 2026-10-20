@@ -1,5 +1,5 @@
 """
-Daily News Buddy - AI News Analyzer for everyone (kids, students, aspirants, adults)
+NewsieNest - AI News Analyzer for everyone (kids, students, aspirants, adults)
 
 Features
 - Live news from BBC, The Hindu, Al Jazeera, Guardian, NPR, NDTV, Indian Express, TOI, HT
@@ -54,7 +54,7 @@ def cfg(name, default=""):
 # Config
 # ----------------------------------------------------------------------------
 APP_VERSION = "v5-selfheal-db"
-APP_NAME = cfg("APP_NAME", "Daily News Buddy")  # change the name any time in Secrets: APP_NAME = "..."
+APP_NAME = cfg("APP_NAME", "NewsieNest")  # change the name any time in Secrets: APP_NAME = "..."
 DB_PATH = os.getenv("NEWSVERSE_DB", "data/newsverse.db")
 UA = {"User-Agent": "Mozilla/5.0 (DailyNewsBuddy learning app)"}
 esc = html.escape
