@@ -56,7 +56,7 @@ def cfg(name, default=""):
 APP_VERSION = "v5-selfheal-db"
 APP_NAME = cfg("APP_NAME", "NewsieNest")  # change the name any time in Secrets: APP_NAME = "..."
 DB_PATH = os.getenv("NEWSVERSE_DB", "data/newsverse.db")
-UA = {"User-Agent": "Mozilla/5.0 (DailyNewsBuddy learning app)"}
+UA = {"User-Agent": "Mozilla/5.0 (NewsieNest learning app)"}
 esc = html.escape
 BROWSER_UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
                             "Chrome/124.0 Safari/537.36",
