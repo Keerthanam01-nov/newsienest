@@ -39,8 +39,9 @@ import requests
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
-
-
+import shutil, sys
+import streamlit.components.v1 as components
+from extras import inject_extra_css, fun_bg, mascot_strip
 def cfg(name, default=""):
     """Read a setting from Streamlit secrets first, then environment variables."""
     try:
@@ -1936,6 +1937,9 @@ def auth_screen():
         login_chars(440)
     with right:
         st.markdown(f"### Welcome to {esc(APP_NAME)}")
+        if not using_pg():
+            st.info("ℹ️ Permanent storage is being set up, so accounts may reset for now. Guest mode always works.")
+        st.caption("Log in to save stories, earn XP and keep your streak. Guests get every feature too.")
         st.caption("Log in to save stories, earn XP and keep your streak. Guests get every feature too.")
         t1, t2, t3, t4 = st.tabs(["Log in", "Sign up", "Forgot password", "Explore"])
         with t1:
@@ -2623,6 +2627,10 @@ def main():
     if "kids_set" in st.session_state:
         st.session_state.kids = st.session_state.pop("kids_set")
     inject_css(st.session_state.kids)
+        inject_css(st.session_state.kids)
+    inject_extra_css(st.session_state.kids)
+    fun_bg()
+    if "visit_logged" not in st.session_state:
     if "visit_logged" not in st.session_state:
         st.session_state.visit_logged = True
         log("visit")
