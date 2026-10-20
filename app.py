@@ -53,7 +53,7 @@ def cfg(name, default=""):
 # ----------------------------------------------------------------------------
 # Config
 # ----------------------------------------------------------------------------
-APP_VERSION = "v6-grounded-chat"
+APP_VERSION = "v7-chat-retry"
 APP_NAME = cfg("APP_NAME", "NewsieNest")  # change the name any time in Secrets: APP_NAME = "..."
 DB_PATH = os.getenv("NEWSVERSE_DB", "data/newsverse.db")
 UA = {"User-Agent": "Mozilla/5.0 (NewsieNest learning app)"}
@@ -637,17 +637,25 @@ def _llm_cached(system, messages_json, max_tokens, search=False):
 
 
 def llm(system, messages, max_tokens=700, search=False):
-    """Returns text, or None when AI is off / busy / call failed."""
-    if not ai_on() or not ai_allowed():
+    """Returns text, or None when AI is off / busy / call failed. Retries without web search if search fails."""
+    if not ai_on():
+        st.session_state.ai_err = "GEMINI_API_KEY (or ANTHROPIC_API_KEY) is not set in Streamlit Secrets"
         return None
-    try:
-        out = _llm_cached(system, json.dumps(messages), max_tokens, search).strip()
-        log("ai")
-        st.session_state.pop("ai_err", None)
-        return out
-    except Exception as e:
-        st.session_state.ai_err = str(e)[:150]
+    if not ai_allowed():
+        st.session_state.ai_err = "daily fair-use limit reached"
         return None
+    payload = json.dumps(messages)
+    last = None
+    for use_search in ([True, False] if search else [False]):
+        try:
+            out = _llm_cached(system, payload, max_tokens, use_search).strip()
+            log("ai")
+            st.session_state.pop("ai_err", None)
+            return out
+        except Exception as e:
+            last = e
+    st.session_state.ai_err = str(last)[:150]
+    return None
 
 
 def ai_status():
@@ -2280,7 +2288,7 @@ def keyword_answer(question):
             best, score = a, sc
     if best and score >= 2 and score >= 0.5 * len(words):
         return (f"I found a related story in today's news:\n\n**{best['title']}**\n\n{short_summary(best, 300)}")
-    why = f" (reason: {st.session_state.get('ai_err')})" if is_admin() and st.session_state.get("ai_err") else ""
+    why = f" (technical reason: {st.session_state.get('ai_err')})" if st.session_state.get("ai_err") else ""
     return ("🦉 I couldn't reach my AI brain just now, so I won't guess. Please ask again in a few seconds. "
             "For official rules, dates and results, also check the government or organisation's own website." + why)
 
