@@ -53,7 +53,7 @@ def cfg(name, default=""):
 # ----------------------------------------------------------------------------
 # Config
 # ----------------------------------------------------------------------------
-APP_VERSION = "v7-chat-retry"
+APP_VERSION = "v8-quota-safe"
 APP_NAME = cfg("APP_NAME", "NewsieNest")  # change the name any time in Secrets: APP_NAME = "..."
 DB_PATH = os.getenv("NEWSVERSE_DB", "data/newsverse.db")
 UA = {"User-Agent": "Mozilla/5.0 (NewsieNest learning app)"}
@@ -569,10 +569,15 @@ def gemini_models():
     return out
 
 
-def _gemini_once(model, system, msgs, max_tokens, attempts, search=False):
+def gemini_keys():
+    """Main key plus optional spare keys (GEMINI_API_KEY_2, GEMINI_API_KEY_3) used when one hits its quota."""
+    return [cfg(n) for n in ("GEMINI_API_KEY", "GEMINI_API_KEY_2", "GEMINI_API_KEY_3") if cfg(n)]
+
+
+def _gemini_once(model, system, msgs, max_tokens, attempts, search=False, key=None):
     """One model, short timeout, automatic retry on timeouts and busy-server errors."""
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-    headers = {"x-goog-api-key": cfg("GEMINI_API_KEY"), "content-type": "application/json"}
+    headers = {"x-goog-api-key": key or cfg("GEMINI_API_KEY"), "content-type": "application/json"}
     body = {"systemInstruction": {"parts": [{"text": system}]},
             "contents": [{"role": "user" if m["role"] == "user" else "model",
                           "parts": [{"text": m["content"]}]} for m in msgs],
@@ -623,11 +628,13 @@ def _call_llm(system, msgs, max_tokens, search=False):
             raise _api_error(r)
         return "".join(b.get("text", "") for b in r.json().get("content", []))
     last = None
-    for i, model in enumerate(gemini_models()[:5]):
-        try:
-            return _gemini_once(model, system, msgs, max_tokens, 2 if i == 0 else 1, search)
-        except Exception as e:  # retired model (404), blocked, busy... try the next one
-            last = last or e
+    models = gemini_models()[:3]
+    for key in gemini_keys():
+        for i, model in enumerate(models):
+            try:
+                return _gemini_once(model, system, msgs, max_tokens, 2 if i == 0 else 1, search, key)
+            except Exception as e:  # retired model, quota (429), blocked... try the next model / spare key
+                last = last or e
     raise last or RuntimeError("No Gemini model available")
 
 
@@ -654,6 +661,8 @@ def llm(system, messages, max_tokens=700, search=False):
             return out
         except Exception as e:
             last = e
+            if "429" in str(e):
+                break  # quota is used up: a second try would only waste more of it
     st.session_state.ai_err = str(last)[:150]
     return None
 
@@ -2288,7 +2297,11 @@ def keyword_answer(question):
             best, score = a, sc
     if best and score >= 2 and score >= 0.5 * len(words):
         return (f"I found a related story in today's news:\n\n**{best['title']}**\n\n{short_summary(best, 300)}")
-    why = f" (technical reason: {st.session_state.get('ai_err')})" if st.session_state.get("ai_err") else ""
+    err = st.session_state.get("ai_err") or ""
+    if "429" in err:
+        return ("🦉 Newsie's free AI quota is used up for the moment (a Google limit). "
+                "Please try again in a minute or two. The news, translation and dictionary still work.")
+    why = f" (technical reason: {err})" if err else ""
     return ("🦉 I couldn't reach my AI brain just now, so I won't guess. Please ask again in a few seconds. "
             "For official rules, dates and results, also check the government or organisation's own website." + why)
 
