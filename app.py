@@ -44,6 +44,31 @@ import streamlit.components.v1 as components
 import os
 import streamlit as st
 
+# 🦉 NewsieNest — AI Mascot
+from pathlib import Path
+import streamlit as st
+
+mascot_path = Path(__file__).parent / "assets" / "newsie_mascot.png"
+
+st.sidebar.markdown("---")
+
+if mascot_path.is_file():
+    st.sidebar.image(str(mascot_path), width=110)
+
+st.sidebar.markdown(
+    """
+    <div style="text-align:center; padding:8px 2px;">
+        <h4 style="margin:0; color:#39D98A;">
+            🦉 NewsieNest
+        </h4>
+        <p style="font-size:12px; color:#9CA3AF; margin-top:5px;">
+            Smarter News. Brighter Future.
+        </p>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
 st.markdown("""
 <style>
 .block-container {
