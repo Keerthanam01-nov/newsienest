@@ -38,7 +38,17 @@ from concurrent.futures import ThreadPoolExecutor
 import requests
 import pandas as pd
 import streamlit as st
-import streamlit.components.v1 as components import boost import mascot_bot
+import streamlit.components.v1 as components
+
+# Optional helper modules. They are not used below, so the app still runs if these files do not exist.
+try:
+    import boost  # noqa: F401
+except Exception:
+    boost = None
+try:
+    import mascot_bot  # noqa: F401
+except Exception:
+    mascot_bot = None
 
 
 def cfg(name, default=""):
