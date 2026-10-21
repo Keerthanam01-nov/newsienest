@@ -40,6 +40,49 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
+# ---- NewsieNest responsive styling ----
+import os
+import streamlit as st
+
+st.markdown("""
+<style>
+.block-container {
+    max-width: 1200px;
+    padding: 1rem 1rem 4rem;
+}
+
+section[data-testid="stSidebar"] {
+    min-width: 230px;
+    max-width: 270px;
+}
+
+section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
+    gap: 0.35rem;
+}
+
+.stButton > button {
+    min-height: 40px;
+    border-radius: 10px;
+    font-weight: 600;
+}
+
+@media (max-width: 768px) {
+    .block-container {
+        padding: 0.7rem 0.65rem 4rem;
+    }
+
+    section[data-testid="stSidebar"] {
+        min-width: 0;
+        max-width: none;
+    }
+
+    h1 {
+        font-size: 1.6rem !important;
+    }
+}
+</style>
+""", unsafe_allow_html=True)
+
 # Optional helper modules. They are not used below, so the app still runs if these files do not exist.
 try:
     import boost  # noqa: F401
