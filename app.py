@@ -535,7 +535,7 @@ SYSTEM_BASE = (
 
 
 def ai_enabled():
-    return bool(cfg("ANTHROPIC_API_KEY") or cfg("GEMINI_API_KEY"))
+    return bool(cfg("ANTHROPIC_API_KEY") or cfg("GROQ_API_KEY") or cfg("GEMINI_API_KEY"))
 
 
 def ai_on():
@@ -627,25 +627,60 @@ def _gemini_once(model, system, msgs, max_tokens, attempts, search=False, key=No
 
 
 def _call_llm(system, msgs, max_tokens, search=False):
+    """Provider fallback chain: Anthropic -> Groq -> Gemini models/keys."""
+    errors = []
+
+    # Try Claude first when configured.
     if cfg("ANTHROPIC_API_KEY"):
-        r = requests.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={"x-api-key": cfg("ANTHROPIC_API_KEY"), "anthropic-version": "2023-06-01",
-                     "content-type": "application/json"},
-            json={"model": cfg("ANTHROPIC_MODEL", "claude-haiku-5-5"), "max_tokens": max_tokens,
-                  "system": system, "messages": msgs}, timeout=30)
-        if not r.ok:
-            raise _api_error(r)
-        return "".join(b.get("text", "") for b in r.json().get("content", []))
-    last = None
-    models = gemini_models()[:3]
-    for key in gemini_keys():
-        for i, model in enumerate(models):
-            try:
-                return _gemini_once(model, system, msgs, max_tokens, 2 if i == 0 else 1, search, key)
-            except Exception as e:  # retired model, quota (429), blocked... try the next model / spare key
-                last = last or e
-    raise last or RuntimeError("No Gemini model available")
+        try:
+            r = requests.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={"x-api-key": cfg("ANTHROPIC_API_KEY"), "anthropic-version": "2023-06-01",
+                         "content-type": "application/json"},
+                json={"model": cfg("ANTHROPIC_MODEL", "claude-3-5-haiku-latest"),
+                      "max_tokens": max_tokens, "system": system, "messages": msgs}, timeout=30)
+            if not r.ok:
+                raise _api_error(r)
+            out = "".join(b.get("text", "") for b in r.json().get("content", []))
+            if out.strip():
+                return out
+        except Exception as e:
+            errors.append(e)
+
+    # Groq is an optional independent provider. Add GROQ_API_KEY in Streamlit Secrets.
+    if cfg("GROQ_API_KEY"):
+        try:
+            chat = [{"role": "user" if m["role"] == "user" else "assistant",
+                     "content": m["content"]} for m in msgs]
+            r = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": "Bearer " + cfg("GROQ_API_KEY"),
+                         "content-type": "application/json"},
+                json={"model": cfg("GROQ_MODEL", "llama-3.3-70b-versatile"),
+                      "temperature": 0.6, "max_tokens": max_tokens,
+                      "messages": [{"role": "system", "content": system}] + chat},
+                timeout=30)
+            if not r.ok:
+                raise _api_error(r)
+            out = r.json()["choices"][0]["message"]["content"]
+            if out and out.strip():
+                return out
+        except Exception as e:
+            errors.append(e)
+
+    # Gemini fallback: try configured keys and several currently available models.
+    try:
+        models = gemini_models()[:3]
+        for key in gemini_keys():
+            for i, model in enumerate(models):
+                try:
+                    return _gemini_once(model, system, msgs, max_tokens,
+                                        2 if i == 0 else 1, search, key)
+                except Exception as e:
+                    errors.append(e)
+    except Exception as e:
+        errors.append(e)
+    raise errors[-1] if errors else RuntimeError("No AI provider is configured")
 
 
 @st.cache_data(ttl=6 * 3600, show_spinner=False, max_entries=500)
@@ -1667,6 +1702,20 @@ html body .stApp [data-testid="stSegmentedControl"] button[data-testid="stBaseBu
 .nv-foot{text-align:center;margin-top:34px;padding:18px 10px 6px;border-top:1px solid var(--line);font-size:.9rem;line-height:1.8;color:var(--ink)}
 .nv-foot a{font-weight:800;text-decoration:none;margin:0 6px;color:#FF9A9A}
 @media (max-width:640px){.block-container{padding:.5rem .6rem 4rem}.nv-card h4{font-size:1rem}}
+
+/* Responsive layout: phone-friendly controls, readable chat and collapsible sidebar */
+@media (max-width: 760px){
+ .block-container{padding:.65rem .75rem 5rem!important}
+ [data-testid="stSidebar"]{min-width:0!important}
+ [data-testid="stChatMessage"]{padding:.65rem!important}
+ .stApp button{min-height:44px!important}
+ [data-testid="stHorizontalBlock"]{gap:.45rem!important}
+ [data-testid="stChatInput"] textarea{font-size:16px!important}
+}
+@media (max-width: 480px){
+ h1{font-size:1.55rem!important} h2{font-size:1.35rem!important} h3{font-size:1.15rem!important}
+ [data-testid="stColumns"]{flex-wrap:wrap!important}
+}
 </style>"""
     st.markdown(css.replace("__SIZE__", size), unsafe_allow_html=True)
 
@@ -1946,6 +1995,22 @@ def sidebar():
     guest = st.session_state.get("guest")
     with st.sidebar:
         st.markdown(f'<div class="nv-side-brand">📰 <b>{esc(APP_NAME)}</b></div>', unsafe_allow_html=True)
+        st.caption("Your learning and news workspace")
+        # Quick navigation stays available on both narrow and wide screens.
+        for nav_label, nav_page in [
+            ("📰 News", "📰 News"), ("💬 Ask Newsie", "💬 Ask Newsie"),
+            ("🧭 My Space", "🧭 My Space"), ("⭐ Rate us", "⭐ Rate us"),
+            ("🔒 Privacy", "🔒 Privacy"),
+        ]:
+            if st.button(nav_label, key="side_nav_" + nav_page, width="stretch"):
+                st.session_state["nav"] = nav_page
+                st.rerun()
+        if st.button("＋ New chat", key="side_new_chat", width="stretch"):
+            st.session_state["chat"] = []
+            st.session_state.pop("pending", None)
+            st.session_state["nav"] = "💬 Ask Newsie"
+            st.rerun()
+        st.divider()
         if u:
             row = q("SELECT xp,streak FROM users WHERE id=?", (u["id"],))[0]
             (lo, name, icon), nxt = level_of(row["xp"])
@@ -2420,8 +2485,14 @@ def render_chat_msg(m):
 
 def page_ask():
     st.markdown("### 💬 Ask Newsie")
-    st.caption("Ask about any news, word or topic. Newsie explains with a 🎭 cartoon, a 🌍 real-life example or a 🎮 game.")
+    st.caption("Ask about school, competitive exams, coding, maths, science, current affairs, writing, or everyday questions.")
+    st.caption("Choose Auto, Cartoon, Real life or Game. Answers support Markdown, lists, tables and code when useful.")
     st.session_state.setdefault("chat", [])
+    top_left, top_right = st.columns([4, 1])
+    with top_right:
+        if st.button("🗑️ Clear chat", key="clear_ask_chat", width="stretch"):
+            st.session_state.chat = []
+            st.rerun()
     pick = st.pills("How should Newsie explain it?", list(CHAT_KEYS), default="✨ Auto", key="chat_style")
     style = CHAT_KEYS.get(pick or "✨ Auto", "auto")
     sug = [("Why do prices go up?", "cartoon"), ("What is GDP?", "real"), ("How do rockets work?", "game"),
@@ -2454,8 +2525,7 @@ def page_ask():
         x("INSERT INTO chats(user_id,ts,question,answer) VALUES(?,?,?,?)", (uid(), iso(), msg[:400], res["content"][:1500]))
         log("chat")
         award(1, "chat_" + str(len(st.session_state.chat)))
-    st.caption(f"Questions you ask are saved to help improve {APP_NAME} and are sent to Google's AI to get an answer. "
-               "Please don't share personal details.")
+    st.caption(f"Chat messages may be stored in your account history and sent to the AI provider configured by the site owner to generate answers. Please don't share passwords or sensitive personal details.")
 
 
 def page_space():
