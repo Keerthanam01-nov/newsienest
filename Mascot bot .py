@@ -1,513 +1,370 @@
 """
-mascot_bot.py - "Robo", the floating robot helper for NewsieNest.
+mascot_bot.py - floating robot chatbot + "How to use" guided tour for NewsieNest.
 
-Put this file next to app.py, then run:  python apply_patch.py app.py
+Drop this file next to app.py. app.py only needs a few one-line hooks (apply_patch.py adds them):
+  mascot_bot.apply_pending()          -> applies page / kids-mode / language changes the bot asked for
+  mascot_bot.render(globals(), pages) -> draws the floating robot button and chat
+  mascot_bot.page_guide(globals(), pages) -> the "Guide" menu page (video + animated tour)
 
-What it gives you
-- A round robot button (bottom-right on every page after login) that opens a chat panel.
-- Chat styles: Auto / Cartoon / Real life / Game (re-uses Newsie's own answer engine, so
-  Claude-first / Gemini-backup, kids filter, dictionary, translation and the cartoon player all work).
-- Navigation by voice-like typing: "open Rate us", "show cricket news", "kids mode on",
-  "change to Hindi", "bigger text", "news about ISRO". These commands work even when AI quota is used up.
-- A 🎬 Guide page: an animated, narrated tour of the whole site, plus optional real video
-  (set GUIDE_VIDEO_URL in Secrets to a YouTube or MP4 link and it shows above the tour).
-
-It only reads from app.py (through the `g` globals dict). It never changes existing functions.
+Nothing in the existing features is changed. Optional secret: HOWTO_VIDEO_URL (YouTube / mp4 link).
 """
 import base64
-import html as _html
-import io
 import json
 import re
-from urllib.parse import quote
+import sys
 
+import requests
 import streamlit as st
 
-BOT_NAME = "Robo"
+ROBOT_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 220">'
+    '<g stroke="#0f1a2e" stroke-width="6" stroke-linejoin="round" stroke-linecap="round">'
+    '<path d="M52 50 L70 72 M148 50 L130 72" fill="none"/>'
+    '<circle cx="40" cy="36" r="17" fill="#22E5E5"/><circle cx="160" cy="36" r="17" fill="#22E5E5"/>'
+    '<rect x="14" y="80" width="26" height="52" rx="10" fill="#19B8C4"/>'
+    '<rect x="160" y="80" width="26" height="52" rx="10" fill="#19B8C4"/>'
+    '<ellipse cx="100" cy="96" rx="70" ry="64" fill="#22E5E5"/>'
+    '<rect x="42" y="66" width="116" height="80" rx="26" fill="#fff"/>'
+    '<rect x="74" y="152" width="52" height="30" rx="14" fill="#19B8C4"/>'
+    '<ellipse cx="72" cy="198" rx="22" ry="13" fill="#22E5E5"/>'
+    '<ellipse cx="128" cy="198" rx="22" ry="13" fill="#22E5E5"/></g>'
+    '<ellipse cx="130" cy="50" rx="14" ry="6" fill="#fff" opacity=".6" transform="rotate(-20 130 50)"/>'
+    '<g stroke="#0f1a2e" stroke-width="4"><circle cx="76" cy="104" r="20" fill="#22E5E5"/>'
+    '<circle cx="124" cy="104" r="20" fill="#22E5E5"/></g>'
+    '<circle cx="76" cy="104" r="12" fill="#0f1a2e"/><circle cx="124" cy="104" r="12" fill="#0f1a2e"/>'
+    '<circle cx="71" cy="99" r="4" fill="#fff"/><circle cx="119" cy="99" r="4" fill="#fff"/>'
+    '<path d="M82 130 Q100 138 118 130" fill="none" stroke="#0f1a2e" stroke-width="4" stroke-linecap="round"/>'
+    "</svg>"
+)
+ROBOT_URI = "data:image/svg+xml;base64," + base64.b64encode(ROBOT_SVG.encode()).decode()
 
-
-# ----------------------------------------------------------------------------
-# Robot avatar (SVG)
-# ----------------------------------------------------------------------------
-def robot_svg():
-    return (
-        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'>"
-        "<defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'>"
-        "<stop offset='0' stop-color='#8B6CFF'/><stop offset='1' stop-color='#FF5C8A'/></linearGradient></defs>"
-        "<circle cx='50' cy='50' r='48' fill='url(#g)'/>"
-        "<line x1='50' y1='15' x2='50' y2='25' stroke='#fff' stroke-width='4' stroke-linecap='round'/>"
-        "<circle cx='50' cy='11' r='5' fill='#FFC93C'/>"
-        "<rect x='12' y='44' width='7' height='16' rx='3' fill='#FFC93C'/>"
-        "<rect x='81' y='44' width='7' height='16' rx='3' fill='#FFC93C'/>"
-        "<rect x='20' y='26' width='60' height='50' rx='16' fill='#fff' stroke='#1c1650' stroke-width='4'/>"
-        "<g class='eyes'><circle cx='38' cy='48' r='7' fill='#1c1650'/><circle cx='62' cy='48' r='7' fill='#1c1650'/>"
-        "<circle cx='40' cy='46' r='2.4' fill='#fff'/><circle cx='64' cy='46' r='2.4' fill='#fff'/></g>"
-        "<g class='mouth'><path d='M38 62 q12 9 24 0' stroke='#1c1650' stroke-width='4' fill='none' stroke-linecap='round'/></g>"
-        "</svg>")
-
-
-def _bot_uri():
-    return "data:image/svg+xml," + quote(robot_svg(), safe="")
-
-
-def _css():
-    uri = _bot_uri()
-    return (
-        "<style>"
-        ".st-key-mb_fab{position:fixed;bottom:18px;right:18px;z-index:999990;width:auto!important}"
-        "html body .stApp .st-key-mb_fab.st-key-mb_fab button{width:68px;height:68px;min-height:68px;padding:0!important;"
-        "border-radius:50%!important;border:3px solid #fff!important;font-size:0!important;"
-        "background:#8B6CFF url(\"" + uri + "\") center/cover no-repeat!important;"
-        "box-shadow:0 8px 24px rgba(0,0,0,.5);animation:mbfloat 3.2s ease-in-out infinite}"
-        ".st-key-mb_fab button *{opacity:0!important;font-size:0!important}"
-        "@keyframes mbfloat{50%{transform:translateY(-6px)}}"
-        "@media (prefers-reduced-motion:reduce){.st-key-mb_fab button{animation:none!important}}"
-        "div[data-testid='stPopoverBody']{width:min(440px,94vw)!important;max-width:94vw!important;"
-        "max-height:82vh;overflow-y:auto;background:#12142A!important;border:1px solid #2E3358!important;border-radius:18px!important}"
-        "div[data-testid='stPopoverBody'] .stButton>button,div[data-testid='stPopoverBody'] [data-testid='stBaseButton-secondary']{"
-        "background:#171A30!important;color:#F2F3FA!important;border:1.5px solid #2E3358!important;border-radius:12px!important}"
-        "div[data-testid='stPopoverBody'] .stButton>button *{color:#F2F3FA!important}"
-        "div[data-testid='stPopoverBody'] button[data-testid='stBaseButton-primaryFormSubmit']{"
-        "background:linear-gradient(135deg,#FF5C5C,#FF8A3D)!important;border:0!important}"
-        "div[data-testid='stPopoverBody'] button[data-testid='stBaseButton-primaryFormSubmit'] *{color:#fff!important}"
-        "@media (max-width:640px){.st-key-mb_fab{bottom:12px;right:12px}}"
-        "</style>")
-
+FAB_CSS = """<style>
+div[data-testid="stPopover"]{position:fixed!important;right:16px;bottom:16px;z-index:9999;width:auto!important}
+div[data-testid="stPopover"] button{width:70px!important;height:70px!important;min-height:70px!important;border-radius:50%!important;
+ background:#0f1a2e url(__ROBOT__) center/80% no-repeat!important;border:3px solid #22E5E5!important;padding:0!important;
+ color:transparent!important;font-size:0!important;box-shadow:0 8px 24px rgba(0,0,0,.5);animation:botpulse 2.6s ease-in-out infinite}
+div[data-testid="stPopover"] button *{display:none!important}
+div[data-testid="stPopover"]::before{content:"Ask me! 💬";position:absolute;right:80px;bottom:20px;background:#fff;color:#1c1650;font-weight:800;font-size:13px;padding:5px 12px;border-radius:14px;border:3px solid #1c1650;white-space:nowrap;pointer-events:none}
+@media (max-width:520px){div[data-testid="stPopover"]::before{display:none}}
+div[data-testid="stPopoverBody"]{width:min(94vw,430px)!important;max-width:94vw!important}
+@keyframes botpulse{0%,100%{box-shadow:0 8px 24px rgba(0,0,0,.5),0 0 0 0 rgba(34,229,229,.5)}50%{box-shadow:0 8px 24px rgba(0,0,0,.5),0 0 0 12px rgba(34,229,229,0)}}
+@media (prefers-reduced-motion:reduce){div[data-testid="stPopover"] button{animation:none}}
+</style>"""
 
 # ----------------------------------------------------------------------------
-# Pending actions (applied at the very top of the next run, before widgets exist)
+# Pending actions (the bot asks, main() applies them BEFORE the widgets are drawn)
 # ----------------------------------------------------------------------------
+def _claude(cfg, system, msgs, max_tokens):
+    key = cfg("ANTHROPIC_API_KEY")
+    if not key:
+        return None
+    r = requests.post("https://api.anthropic.com/v1/messages",
+                      headers={"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+                      json={"model": cfg("ANTHROPIC_MODEL", "claude-haiku-5-5"), "max_tokens": max_tokens,
+                            "system": system, "messages": msgs}, timeout=30)
+    if not r.ok:
+        raise RuntimeError(f"Claude HTTP {r.status_code}: {r.text[:120]}")
+    return "".join(b.get("text", "") for b in r.json().get("content", []))
+
+
+def _groq(cfg, system, msgs, max_tokens):
+    """Free, fast, generous limits. Get a key at console.groq.com and set GROQ_API_KEY."""
+    key = cfg("GROQ_API_KEY")
+    if not key:
+        return None
+    chat = [{"role": "user" if m["role"] == "user" else "assistant", "content": m["content"]} for m in msgs]
+    r = requests.post("https://api.groq.com/openai/v1/chat/completions",
+                      headers={"Authorization": "Bearer " + key},
+                      json={"model": cfg("GROQ_MODEL", "llama-3.3-70b-versatile"), "temperature": 0.6,
+                            "max_tokens": max_tokens, "messages": [{"role": "system", "content": system}] + chat},
+                      timeout=30)
+    if not r.ok:
+        raise RuntimeError(f"Groq HTTP {r.status_code}: {r.text[:120]}")
+    return r.json()["choices"][0]["message"]["content"]
+
+
+def _install(G):
+    """Replaces the app's AI call with: Claude -> Groq -> the app's original Gemini chain. Runs once."""
+    if G.get("_bot_llm_installed"):
+        return
+    orig, orig_enabled, cfg = G.get("_call_llm"), G.get("ai_enabled"), G["cfg"]
+
+    def robust(system, msgs, max_tokens, search=False):
+        errs = []
+        for fn in (_claude, _groq):
+            try:
+                out = fn(cfg, system, msgs, max_tokens)
+                if out and out.strip():
+                    return out
+            except Exception as e:
+                errs.append(e)
+        if orig:
+            try:
+                return orig(system, msgs, max_tokens, search)
+            except Exception as e:
+                errs.append(e)
+        raise errs[-1] if errs else RuntimeError("No AI key set")
+
+    G["_call_llm"] = robust
+    G["ai_enabled"] = lambda: bool(cfg("GROQ_API_KEY") or (orig_enabled() if orig_enabled else False))
+    G["_bot_llm_installed"] = True
+
+
 def apply_pending():
-    """Called by app.py before the sidebar and menu widgets are drawn."""
-    p = st.session_state.pop("_mb_pending", None)
+    _install(sys._getframe(1).f_globals)  # the app's own globals (caller is main())
+    ss = st.session_state
+    p = ss.pop("bot_do", None)
     if not p:
         return
-    try:
-        for state_key, p_key in (("nav", "nav"), ("kids", "kids"), ("lang", "lang"),
-                                 ("tsize", "tsize"), ("topic_pill", "topic")):
-            if p_key in p:
-                st.session_state[state_key] = p[p_key]
-    except Exception:
-        pass
-
-
-def _queue(**kw):
-    st.session_state["_mb_pending"] = kw
+    if "nav" in p:
+        ss["nav"] = p["nav"]
+    if "kids" in p:
+        ss["kids_set"] = p["kids"]
+    if "lang" in p:
+        ss["lang"] = p["lang"]
+    if "topic" in p:
+        ss["topic_pill"] = p["topic"]
 
 
 # ----------------------------------------------------------------------------
-# Command understanding (no AI needed, so it works when quota is used up)
+# Understanding what the person wants
 # ----------------------------------------------------------------------------
-HELP = (f"Hi, I'm **{BOT_NAME}** 🤖. I can:\n"
-        "- **Answer anything** as a 🎭 cartoon, 🌍 real-life example or 🎮 game (pick a style below)\n"
-        "- **Take you around**: *open Rate us*, *go to My Space*, *play the guide video*\n"
-        "- **Show news**: *show cricket news*, *news about ISRO*\n"
-        "- **Change settings**: *kids mode on*, *change language to Hindi*, *bigger text*")
-
-TOPIC_ALIAS = {"cricket": "cricket", "ipl": "cricket", "space": "space", "isro": "space", "rocket": "space",
-               "movie": "movies", "movies": "movies", "film": "movies", "cinema": "movies",
-               "science": "science", "ai": "ai", "tech": "ai", "technology": "ai", "football": "football",
-               "soccer": "football", "exam": "exams", "exams": "exams", "weather": "weather", "rain": "weather"}
-NEWS_WORDS = {"news", "stories", "headlines", "updates", "latest"}
-NAV_VERB = r"\b(open|go|goto|take|bring|show|navigate|visit|switch|jump|head|launch|play|watch|see|view)\b"
-PAGE_PATTERNS = [
-    ("guide", r"\b(guide|tutorial|walkthrough|how[- ]to video|video|tour|demo)\b"),
-    ("ask newsie", r"\b(ask newsie|ask page|chat page|chat with newsie|questions? page)\b"),
-    ("my space", r"\b(my space|profile|saved stories|saved|bookmarks?|leaderboard|my xp|xp|streak|account)\b"),
-    ("rate us", r"\b(rate us|rate|rating|feedback|review)\b"),
-    ("privacy", r"\b(privacy|data safety)\b"),
-    ("owner", r"\b(owner|admin)\b"),
-    ("news", r"\b(news|headlines|stories|home|front page|main page)\b"),
+NAV_RULES = [
+    (r"\b(guide|tutorial|walkthrough|how (do i|to|can i) use|video|tour)\b", "🎬 Guide", False),
+    (r"\b(my space|profile|saved|leaderboard|xp|streak|account)\b", "🧭 My Space", True),
+    (r"\b(ask newsie|chat page|doubts?)\b", "💬 Ask Newsie", True),
+    (r"\b(rate|rating|feedback|review)\b", "⭐ Rate us", True),
+    (r"\b(privacy|data safe)\b", "🔒 Privacy", True),
+    (r"\b(owner|admin|dashboard)\b", "🛡️ Owner", True),
+    (r"\b(news|headlines|stories|home)\b", "📰 News", True),
 ]
+VERB = re.compile(r"\b(open|go to|goto|take me|show|navigate|switch|visit|where is|bring)\b")
+GREET = re.compile(r"(hi+|hello+|hey+|namaste|good (morning|afternoon|evening))[!. ]*")
 
 
-def _find_page(pages, frag):
-    for p in pages:
-        if p.split(" ", 1)[-1].strip().lower() == frag:
-            return p
-    return None
-
-
-def parse_command(text, pages, g):
-    """Returns None (not a command), {"reply", "pending"?} or {"search": query}."""
-    t = " ".join(text.lower().strip().split())
-    words = set(re.findall(r"[a-z]+", t))
-    langs, topics = g.get("LANGS", {}), g.get("TOPICS", {})
-
-    if re.search(r"\bwhat can you do\b|\bhow can you help\b|^help\b|^commands?$", t):
-        return {"reply": HELP}
-
-    # "how do I use this website?" -> the guide
-    if (re.search(r"how (?:do|can|should|to) (?:i |we |you )?use (?:this|the) (?:site|website|app)", t)
-            or re.search(r"how does (?:this|the) (?:site|website|app) work", t)
-            or re.search(r"\b(?:website|site|app)\b.*\b(?:tutorial|guide|walkthrough|demo|video)\b", t)
-            or re.search(r"\b(?:tutorial|walkthrough|demo)\b.*\b(?:website|site|app)\b", t)):
-        page = _find_page(pages, "guide")
-        if page:
-            return {"reply": "Great question! Opening the 🎬 Guide, press ▶ Play for the full tour.",
-                    "pending": {"nav": page}}
-
-    # Kids mode
-    if re.search(r"\bkids? mode\b", t) and re.search(
-            r"\b(turn|switch|put|enable|disable|activate|deactivate|start|stop|exit|set)\b|\b(on|off)\b", t):
-        off = bool(re.search(r"\b(off|disable|deactivate|stop|exit|leave)\b", t))
-        return {"reply": "🧸 Kids Mode is now **off**. You'll see the full news." if off
-                else "🧸 Kids Mode is now **on**: safe stories and simple words.",
-                "pending": {"kids": not off}}
-
-    # Language
-    if re.match(r"^(?:please )?(?:change|switch|set|translate|speak)\b", t) or "language" in words:
-        for key in langs:
-            nm = key.split(" ")[0].lower()
-            if re.search(r"\b" + re.escape(nm) + r"\b", t):
-                return {"reply": f"🌐 Done! Summaries and answers will now be in **{key}**.",
-                        "pending": {"lang": key}}
-
-    # Text size
-    if re.search(r"\b(text|font|letters?|words)\b", t) and re.search(
-            r"\b(big|bigger|large|larger|huge|small|smaller|normal|extra)\b", t):
-        if re.search(r"\b(extra|huge)\b", t):
-            size = "Extra large"
-        elif re.search(r"\b(small|smaller|normal)\b", t):
-            size = "Normal"
-        else:
-            size = "Large"
-        return {"reply": f"🔠 Text size is now **{size}**.", "pending": {"tsize": size}}
-
-    # News on a quick topic
-    hit = next((TOPIC_ALIAS[w] for w in re.findall(r"[a-z]+", t) if w in TOPIC_ALIAS), None)
-    if hit and (words & NEWS_WORDS):
-        label = next((k for k in topics if k.split(" ", 1)[-1].lower().startswith(hit)), None)
-        page = _find_page(pages, "news")
-        if label and page:
-            return {"reply": f"Showing **{label}** news 📰", "pending": {"nav": page, "topic": label}}
-
-    # Search news inline
-    m = re.match(r"^(?:search(?: for)?|find|latest news (?:on|about)|news (?:on|about)|"
-                 r"show me news (?:on|about)|any news (?:on|about))\s+(.{2,60})$", t)
-    if m:
-        return {"search": m.group(1).strip()}
-
-    # Page navigation
-    if re.search(NAV_VERB, t) or t.startswith("where is"):
-        for frag, pat in PAGE_PATTERNS:
-            if re.search(pat, t):
-                page = _find_page(pages, frag)
-                if page:
-                    return {"reply": f"Opening **{page}** 🚀", "pending": {"nav": page}}
-    return None
+def detect(G, msg, pages):
+    """Returns (action_dict, reply) when the message is a command, else (None, None)."""
+    m = msg.lower()
+    if re.search(r"kids? mode", m):
+        off = re.search(r"\b(off|disable|exit|stop|normal)\b", m)
+        return ({"kids": not off},
+                "Kids Mode is OFF. You will see the full news." if off else
+                "🧸 Kids Mode is ON: gentle stories and simple words.")
+    if re.search(r"\b(language|translate|switch to|change to)\b", m):
+        for name in G["LANGS"]:
+            if name.split(" ")[0].lower() in m:
+                return {"lang": name}, f"🌐 Done! Summaries will now be translated to {name.split(' ')[0]}."
+    if re.search(r"\b(news|stories|headlines|updates)\b", m):
+        for label, kw in G["TOPICS"].items():
+            if any(w in m for w in kw.lower().split() if len(w) > 3):
+                if "📰 News" in pages:
+                    return {"nav": "📰 News", "topic": label}, f"Showing {label} stories on the News page 📰"
+    for pat, page, needs_verb in NAV_RULES:
+        if re.search(pat, m) and (not needs_verb or VERB.search(m)):
+            if page not in pages:
+                return {}, "That page is only for the site owner."
+            return {"nav": page}, f"Opening {page} for you ✨"
+    return None, None
 
 
 # ----------------------------------------------------------------------------
-# Answers
+# Answering any question
 # ----------------------------------------------------------------------------
-def _search_news(g, query):
-    try:
-        arts, _ = g["fetch_news"](query, "Top stories", 20, st.session_state.get("kids", False), "All trusted media")
-    except Exception:
-        arts = []
-    if not arts or arts[0].get("source") == "Sample story":
-        return f"🦉 I couldn't find live stories about **{query}** right now. Try the News page search."
-    lines = []
-    for a in arts[:5]:
-        title = a["title"].replace("[", "(").replace("]", ")")
-        ago = g["time_ago"](a.get("published")) if a.get("published") else ""
-        lines.append(f"- [{title}]({a['url']}) · {a['source']} {('· ' + ago) if ago else ''}")
-    return f"📰 Latest on **{query}**:\n\n" + "\n".join(lines)
+def answer(G, msg, style):
+    ss = st.session_state
+    kids = ss.kids
+    if kids and G["KIDS_BLOCK"].search(msg):
+        return {"content": "🤖 That's a topic for grown-ups, so let's explore something else! "
+                           "Try space, animals, cricket or how things work."}
+    if GREET.fullmatch(msg.strip().lower()):
+        return {"content": "Hi! 👋 I'm Newsie Bot. Ask me anything, or say things like "
+                           "“open My Space”, “show cricket news”, “turn on kids mode”."}
+    if not G["ai_enabled"]():
+        return {"content": G["keyword_answer"](msg)}
+    if style != "auto":
+        return G["newsie_answer"](msg, style)  # cartoon / real life / game use the existing engine
+    d = re.match(r"^(?:define|meaning of)\s+([a-z][a-z\- ]{1,30})$", msg.strip().lower())
+    if d:
+        meaning = G["define"](d.group(1).strip())
+        if meaning:
+            return {"content": meaning}
+    sysmsg = (G["GROUND"] + " You can answer ANY question: school subjects, current affairs, technology, coding, "
+              "health basics, careers and daily life. Give the direct answer first, then a short real-life example "
+              f"only if it helps. Plain words, at most 220 words. The reader is {G['audience'](kids)}. "
+              "If asked about this website, say you can open pages for them: News, Ask Newsie, My Space, "
+              "Rate us, Privacy and Guide.")
+    msgs = [{"role": c["role"], "content": c["content"]} for c in ss.chat[-9:-1]]
+    while msgs and msgs[0]["role"] != "user":
+        msgs.pop(0)
+    msgs.append({"role": "user", "content": msg})
+    out = G["llm"](sysmsg, msgs, 800, search=True)
+    return {"content": out or G["keyword_answer"](msg)}
 
 
-def _ai(g, hist, text, style):
-    """Re-use the app's own answer engine (kids filter, dictionary, cartoon, game, real life)."""
-    orig = st.session_state.get("chat")
-    st.session_state.chat = [{"role": m["role"], "content": m["content"]} for m in hist[-9:]]
-    try:
-        res = g["newsie_answer"](text, style)
-    finally:
-        if orig is None:
-            st.session_state.pop("chat", None)
-        else:
-            st.session_state.chat = orig
-    code = g["LANGS"][st.session_state.lang][0]
-    if not res.get("panels") and code != "en":
-        res["content"] = g["tr_safe"](res["content"])
+def handle(G, msg, style, pages):
+    ss = st.session_state
+    ss.chat.append({"role": "user", "content": msg})
+    act, reply = detect(G, msg, pages)
+    if reply:
+        ss.chat.append({"role": "assistant", "content": "🤖 " + reply})
+        if act:
+            ss.bot_do = act
+            st.rerun()
+        return
+    with st.spinner("Newsie Bot is thinking..."):
+        res = answer(G, msg, style)
+    if not res.get("panels") and G["LANGS"][ss.lang][0] != "en":
+        res["content"] = G["tr_safe"](res["content"])
         if res.get("answers"):
-            res["answers"] = g["tr_safe"](res["answers"])
-    return res
-
-
-def _record(g, text, res):
+            res["answers"] = G["tr_safe"](res["answers"])
+    for old in ss.chat:
+        old.pop("panels", None)  # only the newest cartoon stays on screen
+    ss.chat.append({"role": "assistant", **res})
     try:
-        g["x"]("INSERT INTO chats(user_id,ts,question,answer) VALUES(?,?,?,?)",
-               (g["uid"](), g["iso"](), text[:400], res["content"][:1500]))
-        g["log"]("bot")
+        G["x"]("INSERT INTO chats(user_id,ts,question,answer) VALUES(?,?,?,?)",
+               (G["uid"](), G["iso"](), msg[:400], res["content"][:1500]))
+        G["log"]("chat")
     except Exception:
         pass
 
 
-def _handle(g, pages, text, style):
-    hist = st.session_state.setdefault("mb_hist", [])
-    hist.append({"role": "user", "content": text})
-    try:
-        cmd = parse_command(text, pages, g)
-        if cmd and cmd.get("search"):
-            res = {"content": _search_news(g, cmd["search"])}
-        elif cmd:
-            res = {"content": cmd["reply"]}
-            if cmd.get("pending"):
-                _queue(**cmd["pending"])
-        else:
-            with st.spinner(f"{BOT_NAME} is thinking..."):
-                res = _ai(g, hist, text, style)
-    except Exception as e:
-        res = {"content": f"🤖 Oops, something went wrong ({type(e).__name__}). Please try again."}
-    for old in hist:
-        old.pop("panels", None)  # keep only the newest cartoon
-    hist.append({"role": "assistant", **res})
-    del hist[:-24]
-    _record(g, text, res)
-    st.rerun()
-
-
 # ----------------------------------------------------------------------------
-# Floating button + panel
+# The floating robot + chat window
 # ----------------------------------------------------------------------------
-def _panel(g, pages):
-    hist = st.session_state.setdefault("mb_hist", [])
-    st.markdown(
-        f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">'
-        f'<img src="{_bot_uri()}" width="44" height="44" alt="">'
-        f'<div><b style="font-size:1.1rem">{BOT_NAME}</b><br>'
-        f'<small style="color:#AEB3D6">Ask me anything, or tell me where to go</small></div></div>',
-        unsafe_allow_html=True)
-
-    cols = st.columns(3)
-    for i, p in enumerate(pages):
-        if cols[i % 3].button(p, key=f"mb_nav_{i}", width="stretch"):
-            st.session_state.mb_hist.append({"role": "assistant", "content": f"Opening **{p}** 🚀"})
-            _queue(nav=p)
+def arrows(pages):
+    """Fixed ◀ ▶ buttons (bottom-left) to move to the previous / next page."""
+    ss = st.session_state
+    cur = ss.get("nav") if ss.get("nav") in pages else pages[0]
+    i = pages.index(cur)
+    st.markdown("<style>.st-key-navarrows{position:fixed;left:14px;bottom:16px;z-index:9999;width:130px!important}"
+                ".st-key-navarrows button{min-height:52px!important;border-radius:50%!important;font-size:22px!important;padding:0!important}</style>",
+                unsafe_allow_html=True)
+    with st.container(key="navarrows"):
+        a, b = st.columns(2, gap="small")
+        if a.button("◀", key="arr_prev", disabled=i == 0, help="Previous page"):
+            ss.bot_do = {"nav": pages[i - 1]}
+            st.rerun()
+        if b.button("▶", key="arr_next", disabled=i == len(pages) - 1, help="Next page"):
+            ss.bot_do = {"nav": pages[i + 1]}
             st.rerun()
 
-    box = st.container(height=320, border=False)
-    with box:
-        if not hist:
-            st.markdown(HELP)
-        for m in hist[-10:]:
-            with st.chat_message(m["role"], avatar="🤖" if m["role"] == "assistant" else None):
-                if "render_chat_msg" in g:
-                    g["render_chat_msg"](m)
-                else:
-                    st.markdown(m["content"])
 
-    chat_keys = g.get("CHAT_KEYS", {"✨ Auto": "auto", "🎭 Cartoon": "cartoon", "🌍 Real life": "real", "🎮 Game": "game"})
-    pick = st.pills("Answer style", list(chat_keys), default=list(chat_keys)[0], key="mb_style",
-                    label_visibility="collapsed")
-    style = chat_keys.get(pick or list(chat_keys)[0], "auto")
-
-    with st.form("mb_form", clear_on_submit=True):
-        text = st.text_input("Message", placeholder="e.g. open Rate us · show cricket news · explain GDP",
-                             max_chars=300, label_visibility="collapsed")
-        sent = st.form_submit_button("Send ➤", type="primary", width="stretch")
-    if sent and text.strip():
-        _handle(g, pages, text.strip(), style)
-    if hist and st.button("🧹 Clear chat", key="mb_clear"):
-        st.session_state.mb_hist = []
-        st.rerun()
-    st.caption("I'm an AI and can make mistakes. Please don't share personal details.")
-
-
-def render(g, pages):
-    """Draws the floating robot. Called once at the end of every page by app.py."""
-    with st.container(key="mb_fab"):
-        st.markdown(_css(), unsafe_allow_html=True)
-        with st.popover("Chat", help=f"Ask {BOT_NAME}: chat, cartoons, games, or go to any page"):
-            _panel(g, pages)
+def render(G, pages):
+    ss = st.session_state
+    ss.setdefault("chat", [])
+    arrows(pages)
+    st.markdown(FAB_CSS.replace("__ROBOT__", ROBOT_URI), unsafe_allow_html=True)
+    with st.popover("Newsie Bot", help="Chat with Newsie Bot"):
+        st.markdown(
+            f'<div style="display:flex;align-items:center;gap:10px"><img src="{ROBOT_URI}" width="48" alt="">'
+            '<div><b>Newsie Bot</b><br><small>Ask anything. I can also open pages for you.</small></div></div>',
+            unsafe_allow_html=True)
+        keys = G["CHAT_KEYS"]
+        pick = st.pills("Answer style", list(keys), default="✨ Auto", key="bot_style",
+                        label_visibility="collapsed")
+        style = keys.get(pick or "✨ Auto", "auto")
+        quick = [("📰 News", "📰 News"), ("💬 Ask", "💬 Ask Newsie"), ("🧭 Space", "🧭 My Space"), ("🎬 Guide", "🎬 Guide")]
+        for c, (lab, pg) in zip(st.columns(4), quick):
+            if pg in pages and c.button(lab, key="bn_" + pg, width="stretch"):
+                ss.bot_do = {"nav": pg}
+                st.rerun()
+        hist = st.container(height=320)
+        with st.form("bot_form", clear_on_submit=True, border=False):
+            t = st.text_input("Message", placeholder="Ask anything, or say: open My Space",
+                              label_visibility="collapsed", max_chars=400)
+            sent = st.form_submit_button("Send ➤", type="primary", width="stretch")
+        if sent and t.strip():
+            handle(G, t.strip(), style, pages)
+        with hist:
+            if not ss.chat:
+                st.markdown("🤖 Hi! Pick a style above, then ask me anything. Try: *why is the sky blue*, "
+                            "*open My Space*, *show cricket news*, *how do I use this website*.")
+            for m in ss.chat[-6:]:
+                with st.chat_message(m["role"], avatar="🤖" if m["role"] == "assistant" else None):
+                    G["render_chat_msg"](m)
 
 
 # ----------------------------------------------------------------------------
-# 🎬 Guide page: animated, narrated tour (+ optional real video)
+# Guide page: optional real video + animated tour
 # ----------------------------------------------------------------------------
-def _steps(name):
-    return [
-        {"icon": "👋", "title": "Welcome",
-         "text": f"Welcome to {name}! Log in or sign up to save stories and earn XP, or tap Explore to use every feature as a guest. It all works either way.",
-         "chips": ["Log in", "Sign up", "Forgot password", "Explore"]},
-        {"icon": "🎛️", "title": "Your settings",
-         "text": "The left sidebar keeps your settings. Turn on Kids Mode for safe stories and simple words, choose one of fourteen languages, and make the text bigger if you like. On a phone, open the little arrow at the top left.",
-         "chips": ["🧸 Kids Mode", "🌐 Translate", "🔠 Text size", "Log out"]},
-        {"icon": "📰", "title": "Read the news",
-         "text": "On the News page you see a live ticker and quick topic buttons like Cricket or Space. To search, type a topic, choose a category and a news source, set how many stories you want, then press Get news.",
-         "chips": ["🔴 LIVE ticker", "⚡ Quick topics", "Search a topic", "🔎 Get news"]},
-        {"icon": "🧾", "title": "Understand each story",
-         "text": "Every card shows a short summary, a mood label and a credibility hint. These are quick hints, not facts, so use Cross-check or Source to confirm. Save keeps a story and Share sends it on WhatsApp.",
-         "chips": ["😊 Sentiment", "Credibility hint", "🔍 Cross-check", "🔖 Save", "📲 Share"]},
-        {"icon": "✨", "title": "Story Studio",
-         "text": "Press Studio on any card. Pick a two minute briefing, a cartoon where Newsie and Kiki act out the news, a simple explanation, a quiz to earn XP, or a list of hard words with meanings.",
-         "chips": ["📋 2-min briefing", "🎨 Cartoon", "🧒 Explain simply", "🧠 Quiz", "📚 Hard words"]},
-        {"icon": "💬", "title": "Ask Newsie",
-         "text": "Open Ask Newsie to ask any doubt. Choose Auto, Cartoon, Real life or Game to decide how the answer looks. Type just one word to get its dictionary meaning.",
-         "chips": ["✨ Auto", "🎭 Cartoon", "🌍 Real life", "🎮 Game"]},
-        {"icon": "🤖", "title": f"Meet {BOT_NAME}",
-         "text": f"That's me! The round robot button at the bottom right of every page. Ask me anything, or tell me where to go. Try: open Rate us, show cricket news, kids mode on, or change language to Hindi.",
-         "chips": ["open Rate us", "show cricket news", "kids mode on", "change language to Hindi"]},
-        {"icon": "🧭", "title": "My Space",
-         "text": "My Space shows your XP, streak, saved stories and the leaderboard. Finish the daily mission by opening three stories, watching a cartoon and finishing a quiz.",
-         "chips": ["XP", "🔥 Streak", "🔖 Saved", "🏆 Leaderboard"]},
-        {"icon": "⭐", "title": "Rate and stay safe",
-         "text": "Use Rate us to send feedback. The Privacy page explains what we store, and you can delete your account any time from My Space. That's the tour. Have fun!",
-         "chips": ["⭐ Rate us", "🔒 Privacy", "Delete my account"]},
-    ]
+TOUR = [
+    ("Welcome!", "Log in, sign up, or tap Explore to enter as a guest. Every feature works for guests too.", -1),
+    ("📰 News", "Pick a quick topic, search anything, choose a category, then press Get news. The red ticker shows live headlines.", 0),
+    ("✨ Story Studio", "Press Studio on any story for a 2-minute briefing, a cartoon, a simple explanation, a quiz and hard words.", 0),
+    ("🔖 Save and share", "Save keeps a story in My Space. Source opens the publisher, Cross-check compares coverage, Share sends it on WhatsApp.", 0),
+    ("💬 Ask Newsie", "Ask any doubt. Choose Auto, Cartoon, Real life or Game and Newsie answers in that style.", 1),
+    ("🧭 My Space", "See your XP, streak, saved stories and the leaderboard.", 2),
+    ("⚙️ Sidebar", "On the left: Kids Mode, 14 languages, text size, log out and Check connections.", -1),
+    ("🤖 Newsie Bot", "Tap the robot at the bottom-right. Ask anything, or say: open My Space, show cricket news, turn on kids mode.", -1),
+    ("⭐ Rate us and 🔒 Privacy", "Rate us sends feedback. Privacy shows exactly what we store and why.", 3),
+]
+MENU = ["📰 News", "💬 Ask Newsie", "🧭 My Space", "⭐ Rate us", "🔒 Privacy", "🎬 Guide"]
 
-
-@st.cache_data(ttl=86400, show_spinner=False, max_entries=20)
-def _guide_audio(texts, code):
-    from gtts import gTTS
-    out = []
-    for t in texts:
-        try:
-            buf = io.BytesIO()
-            kw = {"tld": "co.in"} if code == "en" else {}
-            gTTS(text=t, lang=code, **kw).write_to_fp(buf)
-            out.append(base64.b64encode(buf.getvalue()).decode())
-        except Exception:
-            out.append("")
-    return out
-
-
-GUIDE_HTML = r"""<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+TOUR_HTML = r"""<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
-*{box-sizing:border-box}html,body{margin:0;font-family:system-ui,'Segoe UI',sans-serif;background:transparent;color:#1c1650}
-.stage{border:4px solid #1c1650;border-radius:22px;box-shadow:6px 6px 0 #1c1650;background:linear-gradient(160deg,#EDE9FF,#FFE9F1);padding:12px;overflow:hidden}
-.top{display:flex;justify-content:space-between;align-items:center;gap:8px;font-weight:800}
-.badge{background:#FFC93C;border:2px solid #1c1650;border-radius:99px;padding:2px 12px;font-size:14px}
-.main{display:flex;gap:12px;align-items:center;margin-top:10px;flex-wrap:wrap}
-.bot{width:110px;flex:0 0 110px}.bot svg{width:100%;height:auto;display:block;overflow:visible}
-.bot.talk{animation:bob .5s ease-in-out infinite}
-.mouth{transform-box:fill-box;transform-origin:50% 0}.bot.talk .mouth{animation:chomp .25s infinite}
-.eyes{animation:blink 4s infinite;transform-box:fill-box;transform-origin:center}
-.screen{flex:1;min-width:220px;background:#fff;border:3px solid #1c1650;border-radius:14px;padding:12px;min-height:170px}
-.icon{font-size:52px;text-align:center;line-height:1.1}.pop{animation:pop .45s ease-out}
-.sh{font-weight:800;font-size:19px;margin:4px 0 6px;text-align:center}
-.chips{display:flex;flex-wrap:wrap;gap:6px;justify-content:center}
-.chips span{background:#EFEAFF;border:2px solid #1c1650;border-radius:99px;padding:3px 10px;font-size:13px;font-weight:700}
-.chips span.hl{background:#FFC93C;animation:pulse 1.1s ease-in-out infinite}
-.cap{background:#fff;border:3px solid #1c1650;border-radius:14px;padding:10px 14px;margin-top:10px;min-height:84px;font-weight:700;font-size:16px;line-height:1.45}
-.bar{height:9px;background:#fff;border:2px solid #1c1650;border-radius:9px;margin-top:10px;overflow:hidden}.bar i{display:block;height:100%;width:0;background:#FF5C5C;transition:width .4s}
-.ctl{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:10px}
-button{font:800 15px system-ui;background:#FFC93C;border:3px solid #1c1650;border-radius:12px;padding:9px 16px;min-height:44px;cursor:pointer;box-shadow:0 3px 0 #1c1650;color:#1c1650}
-button:active{transform:translateY(3px);box-shadow:none}button:focus-visible{outline:3px solid #7a3cff;outline-offset:2px}
-.hint{font-size:12px;text-align:center;margin-top:8px;opacity:.8}
-@keyframes bob{50%{transform:translateY(-6px)}}@keyframes chomp{50%{transform:scaleY(1.9)}}
-@keyframes blink{0%,94%,100%{transform:scaleY(1)}97%{transform:scaleY(.08)}}
-@keyframes pop{0%{transform:scale(.3) rotate(-12deg);opacity:0}70%{transform:scale(1.15)}100%{transform:none;opacity:1}}
-@keyframes pulse{50%{transform:scale(1.08)}}
+*{box-sizing:border-box}html,body{margin:0;font-family:system-ui,'Segoe UI',sans-serif;background:transparent;color:#F2F3FA}
+.box{background:linear-gradient(160deg,#1B1750,#0E1020);border:1px solid #2E3358;border-radius:20px;padding:16px;min-height:430px;display:flex;flex-direction:column;gap:12px}
+.menu{display:flex;gap:6px;flex-wrap:wrap;background:#12142A;padding:8px;border-radius:14px}
+.menu span{padding:6px 12px;border-radius:10px;background:#171A30;border:1.5px solid #2E3358;font-size:13px;font-weight:700;transition:.3s}
+.menu span.on{background:#FF5C5C;border-color:#FF5C5C;transform:scale(1.08);box-shadow:0 0 0 4px rgba(255,92,92,.25)}
+.row{display:flex;gap:14px;align-items:center;flex:1}
+.bot{width:120px;flex:none;animation:bob 3s ease-in-out infinite}
+.bub{background:#fff;color:#1c1650;border:4px solid #1c1650;border-radius:18px;padding:14px 16px;flex:1}
+.bub h3{margin:0 0 6px;font-size:20px}.bub p{margin:0;font-size:16px;line-height:1.45;font-weight:600}
+.cnt{font-size:12px;color:#AEB3D6;text-align:center}
+.bar{height:6px;background:#2E3358;border-radius:9px;overflow:hidden}.bar i{display:block;height:100%;width:0;background:#22E5E5}
+.ctl{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+button{font:700 14px system-ui;background:#171A30;color:#F2F3FA;border:1.5px solid #2E3358;border-radius:12px;padding:10px 16px;min-height:44px;cursor:pointer}
+button.p{background:linear-gradient(135deg,#FF5C5C,#FF8A3D);border:0;color:#fff}
+@keyframes bob{50%{transform:translateY(-8px)}}
+@media (max-width:520px){.row{flex-direction:column}.bot{width:90px}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important}}
 </style></head><body>
-<div class="stage">
- <div class="top"><span class="badge">🎬 __NAME__ guide</span><span id="cnt">1 / 1</span></div>
- <div class="main">
-  <div class="bot" id="bot">__BOT__</div>
-  <div class="screen"><div class="icon" id="icon">👋</div><div class="sh" id="sh"></div><div class="chips" id="chips"></div></div>
- </div>
- <div class="cap" id="cap" aria-live="polite"></div>
- <div class="bar"><i id="bar"></i></div>
- <div class="ctl"><button id="prev">⏮ Back</button><button id="play">▶ Play the tour</button><button id="next">Next ⏭</button></div>
- <div class="hint">🔊 Turn your volume up and press Play. Use Back and Next to go at your own pace.</div>
+<div class="box">
+ <div class="menu" id="menu"></div>
+ <div class="row"><img class="bot" src="__ROBOT__" alt="Newsie Bot">
+  <div class="bub" aria-live="polite"><h3 id="t"></h3><p id="d"></p></div></div>
+ <div class="bar"><i id="b"></i></div><div class="cnt" id="c"></div>
+ <div class="ctl"><button id="prev">⏮ Back</button><button class="p" id="play">▶ Play tour</button>
+  <button id="next">Next ⏭</button><button id="vo">🔊 Voice: off</button></div>
 </div>
 <script>
 (function(){
-const S=__STEPS__,LANG="__LANG__",$=id=>document.getElementById(id);
-let i=0,playing=false,tok=0,cyc=null,typer=null;
-const synth=window.speechSynthesis,au=new Audio();
-function voice(){const vs=synth?synth.getVoices():[],l=LANG.toLowerCase(),pl=l.split('-')[0];
- const pool=vs.filter(v=>v.lang.toLowerCase().replace('_','-').startsWith(pl));
- return pool.find(v=>/natural|google|online/i.test(v.name))||pool[0]||null;}
-function talk(on){$('bot').classList.toggle('talk',on);}
-function say(s,done){
- if(s.audio){au.pause();au.src='data:audio/mpeg;base64,'+s.audio;au.onended=done;au.onerror=done;const pr=au.play();if(pr&&pr.catch)pr.catch(done);return;}
- const wait=()=>setTimeout(done,Math.max(3000,s.text.length*70));
- if(!synth){wait();return;}
- const v=voice();if(!v&&!LANG.startsWith('en')){wait();return;}
- const u=new SpeechSynthesisUtterance(s.text);u.lang=LANG;if(v)u.voice=v;u.rate=.95;u.onend=done;u.onerror=done;window._u=u;synth.speak(u);}
-function show(n,speak){
- i=n;const s=S[n],my=++tok;clearInterval(typer);clearInterval(cyc);if(synth)synth.cancel();au.pause();
- const ic=$('icon');ic.textContent=s.icon;ic.className='icon';void ic.offsetWidth;ic.className='icon pop';
- $('sh').textContent=s.title;
- const box=$('chips');box.textContent='';
- s.chips.forEach(c=>{const e=document.createElement('span');e.textContent=c;box.appendChild(e);});
- const cs=[...box.children];let h=0;
- if(cs.length){cs[0].classList.add('hl');cyc=setInterval(()=>{cs[h].classList.remove('hl');h=(h+1)%cs.length;cs[h].classList.add('hl');},1500);}
- $('bar').style.width=((n+1)/S.length*100)+'%';$('cnt').textContent=(n+1)+' / '+S.length;
- let k=0;$('cap').textContent='';
- typer=setInterval(()=>{$('cap').textContent=s.text.slice(0,++k);if(k>=s.text.length)clearInterval(typer);},speak?30:6);
- if(!speak){talk(false);return;}
- talk(true);let fin=false;
- const done=()=>{if(fin||my!==tok)return;fin=true;talk(false);
-  if(playing&&n+1<S.length)setTimeout(()=>{if(my===tok)show(n+1,true);},500);
-  else if(n+1>=S.length){playing=false;$('play').textContent='\u{1F501} Watch again';}};
- say(s,done);setTimeout(done,12000+s.text.length*110);
-}
-$('play').onclick=()=>{
- if(playing){playing=false;tok++;if(synth)synth.cancel();au.pause();talk(false);$('play').textContent='\u25B6 Play the tour';return;}
- playing=true;$('play').textContent='\u23F8 Pause';show(i>=S.length-1?0:i,true);};
-$('next').onclick=()=>show(Math.min(i+1,S.length-1),playing);
-$('prev').onclick=()=>show(Math.max(i-1,0),playing);
-if(synth){synth.onvoiceschanged=()=>{};}
-show(0,false);
+const S=__STEPS__,M=__MENU__,$=id=>document.getElementById(id);
+let i=0,playing=false,timer=null,voice=false;
+$('menu').innerHTML=M.map(m=>'<span>'+m+'</span>').join('');
+const syn=window.speechSynthesis;
+function speak(t){if(!voice||!syn)return;syn.cancel();const u=new SpeechSynthesisUtterance(t);u.lang='en-IN';u.rate=.95;syn.speak(u);}
+function dur(){return Math.max(5500,S[i][1].length*80);}
+function show(n){i=(n+S.length)%S.length;const s=S[i];
+ $('t').textContent=s[0];$('d').textContent=s[1];$('c').textContent='Step '+(i+1)+' of '+S.length;
+ [...$('menu').children].forEach((el,k)=>el.classList.toggle('on',k===s[2]));
+ const b=$('b');b.style.transition='none';b.style.width='0';void b.offsetWidth;
+ clearTimeout(timer);
+ if(playing){b.style.transition='width '+dur()+'ms linear';b.style.width='100%';timer=setTimeout(()=>show(i+1),dur());}
+ speak(s[0].replace(/[^\w\s]/g,'')+'. '+s[1]);}
+$('play').onclick=()=>{playing=!playing;$('play').textContent=playing?'⏸ Pause':'▶ Play tour';show(i);if(!playing&&syn)syn.cancel();};
+$('next').onclick=()=>show(i+1);$('prev').onclick=()=>show(i-1);
+$('vo').onclick=()=>{voice=!voice;$('vo').textContent='🔊 Voice: '+(voice?'on':'off');if(voice)speak(S[i][1]);else if(syn)syn.cancel();};
+show(0);
 })();
 </script></body></html>"""
 
 
-def _guide_html(steps, voice_lang, name):
-    data = json.dumps(steps, ensure_ascii=False).replace("</", "<\\/")
-    return (GUIDE_HTML.replace("__STEPS__", data).replace("__LANG__", _html.escape(voice_lang))
-            .replace("__NAME__", _html.escape(name)).replace("__BOT__", robot_svg()))
-
-
-def page_guide(g, pages):
-    name = g.get("APP_NAME", "NewsieNest")
-    st.markdown(f"### 🎬 How to use {_html.escape(name)}")
-    st.caption("Watch the guided tour, or jump straight to any page below.")
-
-    vid = g["cfg"]("GUIDE_VIDEO_URL") if "cfg" in g else ""
-    if vid:
-        try:
-            st.video(vid)
-        except Exception:
-            st.link_button("▶ Watch the video", vid)
-
-    langs = g.get("LANGS", {})
-    code, voice = langs.get(st.session_state.get("lang", "English"), ("en", "en-IN"))
-    steps = _steps(name)
-
-    if code != "en":
-        try:
-            flat = tuple(s[k] for s in steps for k in ("title", "text"))
-            tr = list(g["translate_many"](flat, code))
-            for n, s in enumerate(steps):
-                s["title"], s["text"] = tr[2 * n], tr[2 * n + 1]
-        except Exception:
-            st.caption("Translation isn't available right now, so the tour is in English.")
-            code, voice = "en", "en-IN"
-
-    if st.toggle("🔊 Clear voice (works on every device)", value=True, key="mb_guide_voice"):
-        with st.spinner("Preparing the voice..."):
-            audio = _guide_audio(tuple(s["text"] for s in steps), code)
-        for s, a in zip(steps, audio):
-            if a:
-                s["audio"] = a
-
-    if hasattr(st, "iframe"):
-        st.iframe(_guide_html(steps, voice, name), height=620)
-    else:
-        import streamlit.components.v1 as components
-        components.html(_guide_html(steps, voice, name), height=620, scrolling=True)
-
-    st.markdown("#### 🚀 Try it yourself")
-    cols = st.columns(3)
-    for i, p in enumerate(pages):
-        if p.split(" ", 1)[-1].strip().lower() == "guide":
-            continue
-        if cols[i % 3].button(p, key=f"mb_gd_{i}", width="stretch"):
-            _queue(nav=p)
+def page_guide(G, pages):
+    st.markdown("### 🎬 How to use " + G["APP_NAME"])
+    url = G["cfg"]("HOWTO_VIDEO_URL")
+    if url.startswith("http"):
+        st.video(url)
+        st.caption("Prefer a quick animated tour? Press Play below.")
+    markup = (TOUR_HTML.replace("__STEPS__", json.dumps(TOUR, ensure_ascii=False).replace("</", "<\\/"))
+              .replace("__MENU__", json.dumps(MENU, ensure_ascii=False))
+              .replace("__ROBOT__", ROBOT_URI))
+    G["embed_html"](markup, 470)
+    st.markdown("#### Jump to a page")
+    targets = [p for p in pages if p != "🎬 Guide"]
+    for c, pg in zip(st.columns(len(targets)), targets):
+        if c.button(pg, key="gj_" + pg, width="stretch"):
+            st.session_state.bot_do = {"nav": pg}
             st.rerun()
-    st.caption(f"Tip: the round robot button at the bottom right is {BOT_NAME}. Ask {BOT_NAME} to take you anywhere.")
+    st.caption("Tip: tap the 🤖 robot at the bottom-right any time and say “open My Space” or “show cricket news”.")
