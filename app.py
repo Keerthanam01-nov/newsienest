@@ -2394,7 +2394,10 @@ CHAT_KEYS = {"✨ Auto": "auto", "🎭 Cartoon": "cartoon", "🌍 Real life": "r
 STYLE_ICON = {"auto": "📖", "cartoon": "🎭", "real": "🌍", "game": "🎮"}
 GROUND = ("You are Newsie, a friendly teacher-chatbot for readers in India. Explain accurately and kindly. "
           "For current facts (results, dates, rules, prices) use web search when available and name the source site. "
-          "If you cannot confirm something, say so and point to the official website instead of guessing. "
+          "Never claim a result, exam score, recruitment list, or government outcome is 'not released yet' unless a current, "
+          "reliable official source explicitly confirms that status. Treat the user's stated facts as the premise unless "
+          "you have reliable evidence that they are wrong. If you cannot verify current status, say 'I can't verify the "
+          "latest status here' and direct the user to the official portal; do not invent a release status. "
           "Never ask for personal details. Politely steer away from adult or harmful topics.")
 
 
@@ -2637,7 +2640,20 @@ def newsie_answer(question, style):
                 "panels": prepare_panels(panels)
             }
 
-        style = "real"
+        # Offline cartoon fallback: still give the user a usable cartoon when
+        # AI quota/key errors occur. Do not fabricate time-sensitive status.
+        q = question.strip().rstrip(".?!")
+        safe_q = q[:220] if q else "this topic"
+        local_panels = [
+            {"speaker": "Kiki", "emoji": "🤔📣", "text": f"Newsie, can you explain this clearly: {safe_q}?", "action": "think", "motion": "float"},
+            {"speaker": "Newsie", "emoji": "🦉📘", "text": f"Let's start with the main point: {safe_q}. We'll separate confirmed facts from anything that still needs checking.", "action": "point", "motion": "zoom"},
+            {"speaker": "Kiki", "emoji": "🔎🧩", "text": "How do we know the details are correct? We should look for a dated notice or update from the official source.", "action": "think", "motion": "spin"},
+            {"speaker": "Newsie", "emoji": "📄✅", "text": "If an official result or notice has already been published, use that published notice. I won't call it pending without evidence.", "action": "cheer", "motion": "zoom"},
+            {"speaker": "Kiki", "emoji": "💡", "text": "So we should check the exact department, exam, or scheme portal and its latest dated announcement—not rely on a guess!", "action": "point", "motion": "float"},
+            {"speaker": "Newsie", "emoji": "👋🎉", "text": "Remember: confirmed facts first, official source next, and no guessing about result dates. Stay curious!", "action": "wave", "motion": "zoom"}
+        ]
+        st.session_state.ai_err = st.session_state.get("ai_err") or "AI unavailable; showing offline cartoon fallback."
+        return {"content": "🎭 AI is temporarily unavailable, so here's a safe offline cartoon. For a specific result status, check the latest official notice.", "panels": prepare_panels(local_panels)}
 
     if style == "game":
         prompt = (
