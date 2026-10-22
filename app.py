@@ -2377,8 +2377,33 @@ def offline_topic_answer(question, style="auto"):
     is_upsc = any(term in q for term in ("upsc", "civil services exam", "ias exam"))
     asks_to_write = any(term in q for term in ("how to write", "write a", "write an", "format of", "email format", "mail format"))
     asks_mail = any(term in q for term in ("mail", "email", "e-mail", "main", "leave letter", "application letter"))
+    asks_gmail_meaning = any(term in q for term in ("gmail stands for", "full form of gmail", "gmail full form", "what is gmail", "meaning of gmail"))
+    asks_gmail_vs_email = any(term in q for term in ("gmail vs email", "gmail and email", "difference between gmail and email", "difference of gmail and email", "gmail or email"))
 
-    if asks_to_write and asks_mail:
+    if asks_gmail_meaning:
+        base = ("**What does Gmail stand for?**\n\n"
+                "Gmail was originally short for **Google Mail**. Today, **Gmail** is the name of Google's email service.\n\n"
+                "An email address on Gmail usually looks like `yourname@gmail.com`.")
+        panels = [
+            {"speaker":"Kiki","emoji":"📧🤔","text":"Newsie, what does Gmail stand for?","action":"think","motion":"float"},
+            {"speaker":"Newsie","emoji":"🦉💡","text":"Gmail was originally short for Google Mail. Today, Gmail is the name of Google's email service.","action":"point","motion":"zoom"},
+            {"speaker":"Kiki","emoji":"📩","text":"So an address ending in gmail.com uses Google's email service?","action":"think","motion":"spin"},
+            {"speaker":"Newsie","emoji":"✅📧","text":"Exactly! For example, someone might have an address like yourname@gmail.com.","action":"cheer","motion":"float"}
+        ]
+        game = ("🎮 **Quick quiz**\n\nWhat is Gmail?\nA) Google's email service\nB) A web browser\nC) A computer keyboard\n\n###ANSWERS###\nA) Google's email service.")
+    elif asks_gmail_vs_email:
+        base = ("**Gmail vs. email**\n\n"
+                "- **Email** means electronic mail—the general way of sending messages over the internet.\n"
+                "- **Gmail** is one email service, made by Google.\n\n"
+                "Think of it this way: email is like the category, and Gmail is one provider in that category. Other email services include Outlook and Yahoo Mail. You can have an email address with Gmail, Outlook, Yahoo Mail, or another provider.")
+        panels = [
+            {"speaker":"Kiki","emoji":"📬🤔","text":"Is Gmail the same thing as email?","action":"think","motion":"float"},
+            {"speaker":"Newsie","emoji":"🦉📚","text":"Not exactly. Email is the general way to send electronic messages, while Gmail is Google's email service.","action":"point","motion":"zoom"},
+            {"speaker":"Kiki","emoji":"💡","text":"So Outlook and Yahoo Mail are email services too?","action":"think","motion":"spin"},
+            {"speaker":"Newsie","emoji":"✅📧","text":"Correct! Gmail, Outlook and Yahoo Mail are different services you can use to send and receive email.","action":"cheer","motion":"float"}
+        ]
+        game = ("🎮 **Quick quiz**\n\nWhich statement is correct?\nA) Gmail is one email service\nB) Email only works with Gmail\nC) Gmail is a keyboard\n\n###ANSWERS###\nA) Gmail is one email service.")
+    elif asks_to_write and asks_mail:
         base = ("**How to write a mail / email**\n\n"
                 "1. **To:** Enter the receiver's email address.\n"
                 "2. **Subject:** Write a short reason for the email.\n"
