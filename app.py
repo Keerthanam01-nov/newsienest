@@ -2371,11 +2371,33 @@ STOPWORDS = set("what when where which whom whose about with from that this thes
 def offline_topic_answer(question, style="auto"):
     """Useful no-AI responses for common India education/exam queries."""
     q = re.sub(r"\s+", " ", str(question or "").lower()).strip()
-    is_vao = any(term in q for term in ("vao", "village administrative officer"))
+    # Be forgiving of short queries and common typing mistakes (e.g. "ao rpc").
+    is_vao = any(term in q for term in ("vao", "village administrative officer", "ao rpc", "vao rpc"))
     asks_vao_result = any(term in q for term in ("rpc", "result", "2026", "score", "merit", "cutoff", "cut off", "selection list"))
     is_upsc = any(term in q for term in ("upsc", "civil services exam", "ias exam"))
+    asks_to_write = any(term in q for term in ("how to write", "write a", "write an", "format of", "email format", "mail format"))
+    asks_mail = any(term in q for term in ("mail", "email", "e-mail", "main", "leave letter", "application letter"))
 
-    if is_vao:
+    if asks_to_write and asks_mail:
+        base = ("**How to write a mail / email**\n\n"
+                "1. **To:** Enter the receiver's email address.\n"
+                "2. **Subject:** Write a short reason for the email.\n"
+                "3. **Greeting:** Dear Sir/Madam, or Hello [Name],\n"
+                "4. **Message:** Introduce yourself, explain why you are writing, and include the important details clearly.\n"
+                "5. **Closing:** Thank you, / Regards,\n"
+                "6. **Name:** Write your full name.\n\n"
+                "**Example — asking for information**\n\n"
+                "**Subject:** Request for Information\n\n"
+                "Dear Sir/Madam,\n\nI am writing to request information about [topic]. Could you please share the details and any relevant dates or instructions?\n\nThank you for your time.\n\nRegards,\n[Your Name]\n\n"
+                "If you meant the *main body of an essay* rather than an email, ask ‘how to write an essay’ and I can show that format.")
+        panels = [
+            {"speaker":"Kiki","emoji":"✉️🤔","text":"Newsie, how do I write a clear email?","action":"think","motion":"float"},
+            {"speaker":"Newsie","emoji":"🦉📋","text":"Start with a clear subject, greet the reader, and explain your purpose in a few simple sentences.","action":"point","motion":"zoom"},
+            {"speaker":"Kiki","emoji":"📝","text":"How should I finish it?","action":"think","motion":"spin"},
+            {"speaker":"Newsie","emoji":"✅✉️","text":"Thank the reader, close politely with Regards, and add your name. Check spelling before sending.","action":"wave","motion":"zoom"}
+        ]
+        game = ("🎮 **Email-writing mini quiz**\n\n1. What should the subject line do? A) Explain the purpose briefly B) Be left blank always C) Tell a joke\n\n2. What belongs at the end? A) Your name B) A random password C) Nothing\n\n###ANSWERS###\n1. A — a clear subject helps the reader understand the email.\n2. A — close politely and include your name.")
+    elif is_vao:
         if asks_vao_result:
             base = (
                 "**Karnataka VAO / RPC result information**\n\n"
