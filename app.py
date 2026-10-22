@@ -2123,10 +2123,22 @@ def auth_screen():
                                            "If you did not request a password reset, you can ignore this email.")
                             # Keep the response generic so account existence is not disclosed.
                             st.success("If an account exists for that email, a reset code has been sent. Check your inbox and spam folder.")
-                        except Exception:
+                        except Exception as exc:
                             # Remove the undelivered code so it cannot leave a confusing active reset.
                             x("DELETE FROM resets WHERE email=?", (email_norm,))
-                            st.error("We couldn't send the email. Please try again later or contact the site owner.")
+                            # Give the site owner a useful, non-secret diagnostic instead of hiding
+                            # the SMTP failure. Never display the SMTP password or secret values.
+                            import smtplib as _smtplib
+                            if isinstance(exc, _smtplib.SMTPAuthenticationError):
+                                st.error("Email sign-in was rejected. In Streamlit Cloud → Settings → Secrets, check that SMTP_USER is the full sender email and SMTP_PASSWORD is that account's App Password (not its normal password).")
+                            elif isinstance(exc, _smtplib.SMTPRecipientsRefused):
+                                st.error("The email server rejected the recipient address. Check the account email spelling and your sender provider's delivery restrictions.")
+                            elif isinstance(exc, (_smtplib.SMTPConnectError, _smtplib.SMTPServerDisconnected, TimeoutError, OSError)):
+                                st.error("NewsieNest could not connect to the email server. Check SMTP_HOST and SMTP_PORT; Gmail normally uses smtp.gmail.com with port 587 (STARTTLS) or 465 (SSL). The hosting environment may also block SMTP.")
+                            elif isinstance(exc, _smtplib.SMTPException):
+                                st.error(f"The email server reported an SMTP error ({type(exc).__name__}). Check the sender settings and server logs.")
+                            else:
+                                st.error(f"The reset email failed ({type(exc).__name__}). Check the SMTP settings in Streamlit Cloud → Settings → Secrets, then request a fresh code.")
             st.markdown("**Step 2. Set your new password**")
             with st.form("fp_set"):
                 e2 = st.text_input("Account email", key="fp_e2")
