@@ -2490,58 +2490,243 @@ def prepare_panels(panels):
     return panels
 
 
+def _newsie_groq_key():
+    """Read Groq credentials securely from Streamlit Secrets or environment."""
+    import os
+    try:
+        key = str(st.secrets.get("GROQ_API_KEY", "")).strip()
+    except Exception:
+        key = ""
+    return key or os.environ.get("GROQ_API_KEY", "").strip()
+
+
+def _newsie_groq_call(system, messages, max_tokens=700):
+    """Call Groq's OpenAI-compatible chat API."""
+    import urllib.request
+    import urllib.error
+
+    key = _newsie_groq_key()
+    if not key:
+        raise RuntimeError("GROQ_API_KEY is not configured")
+
+    try:
+        model = str(st.secrets.get(
+            "GROQ_MODEL", "llama-3.3-70b-versatile"
+        )).strip()
+    except Exception:
+        model = "llama-3.3-70b-versatile"
+
+    chat_messages = [{"role": "system", "content": system}]
+    for message in messages:
+        role = message.get("role", "user")
+        if role in ("user", "assistant"):
+            chat_messages.append({
+                "role": role,
+                "content": str(message.get("content", ""))
+            })
+
+    body = json.dumps({
+        "model": model,
+        "messages": chat_messages,
+        "max_tokens": max_tokens,
+        "temperature": 0.7
+    }).encode("utf-8")
+
+    request = urllib.request.Request(
+        "https://api.groq.com/openai/v1/chat/completions",
+        data=body,
+        headers={
+            "Authorization": "Bearer " + key,
+            "Content-Type": "application/json"
+        },
+        method="POST"
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=35) as response:
+            data = json.loads(response.read().decode("utf-8"))
+        answer = data["choices"][0]["message"]["content"]
+        if not answer or not str(answer).strip():
+            raise RuntimeError("Groq returned an empty answer")
+        return str(answer).strip()
+    except urllib.error.HTTPError as error:
+        detail = error.read().decode("utf-8", errors="replace")
+        raise RuntimeError(
+            "Groq HTTP " + str(error.code) + ": " + detail[:250]
+        ) from error
+
+
+def llm(system, messages, max_tokens=700, search=False):
+    """Try Groq first; fall back to the existing configured AI provider."""
+    groq_key = _newsie_groq_key()
+
+    if not groq_key and not ai_on():
+        st.session_state.ai_err = (
+            "Add GROQ_API_KEY, GEMINI_API_KEY, or ANTHROPIC_API_KEY "
+            "in Streamlit Cloud Secrets."
+        )
+        return None
+
+    if not ai_allowed():
+        st.session_state.ai_err = "Daily fair-use limit reached."
+        return None
+
+    errors = []
+
+    # Primary provider: Groq. Search is handled by the existing fallback
+    # provider when it supports web search.
+    if groq_key:
+        try:
+            answer = _newsie_groq_call(system, messages, max_tokens)
+            log("ai")
+            st.session_state.pop("ai_err", None)
+            return answer
+        except Exception as error:
+            errors.append("Groq: " + str(error)[:250])
+
+    # Fallback: preserve your existing Gemini/Anthropic implementation.
+    if ai_on():
+        for use_search in ([True, False] if search else [False]):
+            try:
+                answer = _llm_cached(
+                    system,
+                    json.dumps(messages),
+                    max_tokens,
+                    use_search
+                ).strip()
+
+                if answer:
+                    log("ai")
+                    st.session_state.pop("ai_err", None)
+                    return answer
+
+            except Exception as error:
+                errors.append("Fallback AI: " + str(error)[:250])
+                if "429" in str(error):
+                    break
+
+    st.session_state.ai_err = (
+        " | ".join(errors)[:350] if errors
+        else "No AI provider returned an answer."
+    )
+    return None
+
+
 def newsie_answer(question, style):
-    """Returns {"content": text, "panels": [...] or None, "answers": text or None}."""
-    kids = st.session_state.kids
+    """Return an answer, cartoon panels, or game answers."""
+    kids = st.session_state.get("kids", False)
+
     if kids and KIDS_BLOCK.search(question):
-        return {"content": "🦉 That's a topic for grown-ups, so let's explore something else! "
-                           "Try asking about space, animals, cricket or how things work."}
+        return {
+            "content": (
+                "🦉 That's a topic for grown-ups, so let's explore "
+                "something else! Try asking about space, animals, "
+                "cricket or how things work."
+            )
+        }
+
     if style == "auto":
-        w = dictionary_intent(question)
-        if w:
-            d = define(w)
-            if d:
-                return {"content": d}
-    if not ai_enabled():
+        word = dictionary_intent(question)
+        if word:
+            definition = define(word)
+            if definition:
+                return {"content": definition}
+
+    # Allow Groq even if ai_enabled() only checks your previous providers.
+    if not ai_enabled() and not _newsie_groq_key():
         return {"content": keyword_answer(question)}
-    heads = "\n".join("- " + a["title"] for a in st.session_state.get("articles", [])[:8])
-    ctx = f"{GROUND} You are chatting with {audience(kids)}. Today's headlines on screen (context only):\n{heads}"
+
+    headlines = "\n".join(
+        "- " + article["title"]
+        for article in st.session_state.get("articles", [])[:8]
+    )
+    context = (
+        f"{GROUND} You are chatting with {audience(kids)}. "
+        "Today's headlines on screen (context only):\n"
+        f"{headlines}"
+    )
+
     if style == "cartoon":
-        out = llm(ctx, [{"role": "user", "content":
-            "Explain this as an animated 6-panel comic starring Newsie the owl (explains) and Kiki the tiger cub "
-            "(asks funny questions). Use a real-life example in the middle. Each text must be 15-30 words. "
-            "Reply with ONLY a JSON array of 6 objects: "
-            '{"speaker":"Newsie" or "Kiki","emoji":"1-3 emojis for the scene","text":"...",'
-            '"action":"wave|jump|point|think|cheer|surprise","motion":"float|drive|fly|spin|shake|zoom"}.\n'
-            f"Question: {question}"}], 1400)
-        panels = _parse_panels(out or "", guess_emoji(question))
+        prompt = (
+            "Explain this as an animated 6-panel comic starring Newsie "
+            "the owl (explains) and Kiki the tiger cub (asks funny "
+            "questions). Use a real-life example in the middle. "
+            "Each text must be 15-30 words. Reply with ONLY a JSON "
+            "array of 6 objects: "
+            '{"speaker":"Newsie" or "Kiki","emoji":"1-3 emojis for '
+            'the scene","text":"...","action":"wave|jump|point|think|'
+            'cheer|surprise","motion":"float|drive|fly|spin|shake|zoom"}'
+            f"\nQuestion: {question}"
+        )
+        output = llm(
+            context, [{"role": "user", "content": prompt}], 1400
+        )
+        panels = _parse_panels(output or "", guess_emoji(question))
+
         if panels:
-            return {"content": "🎭 Here's your cartoon! Press ▶ Play to watch Newsie and Kiki explain it.",
-                    "panels": prepare_panels(panels)}
-        style = "real"  # the comic could not be made, so answer in words instead
+            return {
+                "content": (
+                    "🎭 Here's your cartoon! Press ▶ Play to watch "
+                    "Newsie and Kiki explain it."
+                ),
+                "panels": prepare_panels(panels)
+            }
+
+        style = "real"
+
     if style == "game":
-        out = llm(ctx, [{"role": "user", "content":
-            "Turn this into a fun mini-game. Write one cheerful intro line, then a 3-question 'Guess it!' game with "
-            "emojis, each question numbered with options A, B and C on separate lines. Then write a line that says "
-            "exactly ###ANSWERS### followed by the answers with a one-line reason each. Under 220 words.\n"
-            f"Topic: {question}"}], 800)
-        if out:
-            head, _, ans = out.partition("###ANSWERS###")
-            return {"content": "🎮 " + head.strip(), "answers": ans.strip() or None}
+        prompt = (
+            "Turn this into a fun mini-game. Write one cheerful intro "
+            "line, then a 3-question 'Guess it!' game with emojis. "
+            "Number each question and put options A, B and C on "
+            "separate lines. Then write a line that says exactly "
+            "###ANSWERS### followed by the answers with a one-line "
+            "reason each. Under 220 words.\n"
+            f"Topic: {question}"
+        )
+        output = llm(
+            context, [{"role": "user", "content": prompt}], 800
+        )
+
+        if output:
+            heading, _, answers = output.partition("###ANSWERS###")
+            return {
+                "content": "🎮 " + heading.strip(),
+                "answers": answers.strip() or None
+            }
+
         return {"content": keyword_answer(question)}
-    task = ("Explain it with a vivid real-life example or everyday analogy from India (cricket, chai stall, bus, "
-            "school, kitchen). Use this layout: **In one line**, **Real-life example**, **Try it yourself** (one small "
-            "activity). Under 170 words, emojis welcome.")
+
+    task = (
+        "Explain it with a vivid real-life example or everyday analogy "
+        "from India (cricket, chai stall, bus, school, kitchen). "
+        "Use this layout: **In one line**, **Real-life example**, "
+        "**Try it yourself** (one small activity). Under 170 words; "
+        "emojis welcome."
+    )
+
     if style == "auto":
-        task += " End with: Want it as a 🎭 cartoon or a 🎮 game? Pick a style above!"
-    msgs = [{"role": m["role"], "content": m["content"]} for m in st.session_state.chat[-9:-1]]
-    while msgs and msgs[0]["role"] != "user":
-        msgs.pop(0)
-    msgs.append({"role": "user", "content": f"{task}\nQuestion: {question}"})
-    out = llm(ctx, msgs, 700, search=True)
-    return {"content": out or keyword_answer(question)}
+        task += (
+            " End with: Want it as a 🎭 cartoon or a 🎮 game? "
+            "Pick a style above!"
+        )
 
+    messages = [
+        {"role": message["role"], "content": message["content"]}
+        for message in st.session_state.get("chat", [])[-9:-1]
+        if message.get("role") in ("user", "assistant")
+    ]
 
+    while messages and messages[0]["role"] != "user":
+        messages.pop(0)
+
+    messages.append({
+        "role": "user",
+        "content": f"{task}\nQuestion: {question}"
+    })
+
+    output = llm(context, messages, 700, search=True)
+    return {"content": output or keyword_answer(question)}
 def render_chat_msg(m):
     st.markdown(m["content"])
     if m.get("answers"):
