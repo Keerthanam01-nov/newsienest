@@ -10,7 +10,7 @@ Features
 - Login (PBKDF2), forgot password, guest mode, XP + streaks
 - Privacy page, ratings, owner dashboard (visits, feedback), backups, data deletion
 
-Secrets: DATABASE_URL (Neon, permanent data), GEMINI_API_KEY, ADMIN_EMAILS, APP_NAME,
+Secrets: DATABASE_URL (Neon, permanent data), GEMINI_API_KEY, GROQ_API_KEY (optional), ADMIN_EMAILS, APP_NAME,
 CONTACT_EMAIL, GITHUB_URL, APP_URL, NEWSAPI_KEY
 Optional (password-reset emails): SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SMTP_FROM
 """
@@ -40,73 +40,7 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
-# ---- NewsieNest responsive styling ----
-import os
-import streamlit as st
-
-# 🦉 NewsieNest — AI Mascot
 from pathlib import Path
-import streamlit as st
-
-mascot_path = Path(__file__).parent / "assets" / "newsie_mascot.png"
-
-st.sidebar.markdown("---")
-
-if mascot_path.is_file():
-    st.sidebar.image(str(mascot_path), width=110)
-
-st.sidebar.markdown(
-    """
-    <div style="text-align:center; padding:8px 2px;">
-        <h4 style="margin:0; color:#39D98A;">
-            🦉 NewsieNest
-        </h4>
-        <p style="font-size:12px; color:#9CA3AF; margin-top:5px;">
-            Smarter News. Brighter Future.
-        </p>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
-
-st.markdown("""
-<style>
-.block-container {
-    max-width: 1200px;
-    padding: 1rem 1rem 4rem;
-}
-
-section[data-testid="stSidebar"] {
-    min-width: 230px;
-    max-width: 270px;
-}
-
-section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
-    gap: 0.35rem;
-}
-
-.stButton > button {
-    min-height: 40px;
-    border-radius: 10px;
-    font-weight: 600;
-}
-
-@media (max-width: 768px) {
-    .block-container {
-        padding: 0.7rem 0.65rem 4rem;
-    }
-
-    section[data-testid="stSidebar"] {
-        min-width: 0;
-        max-width: none;
-    }
-
-    h1 {
-        font-size: 1.6rem !important;
-    }
-}
-</style>
-""", unsafe_allow_html=True)
 
 # Optional helper modules. They are not used below, so the app still runs if these files do not exist.
 try:
@@ -211,6 +145,24 @@ DEMO_ARTICLES = [
 
 st.set_page_config(page_title=f"{APP_NAME} - understand the news", page_icon="📰",
                    layout="wide", initial_sidebar_state="expanded")
+
+# Responsive styling: safe on desktop and mobile.
+st.markdown("""
+<style>
+.block-container { max-width: 1200px; padding: 1rem 1rem 4rem; }
+.stButton > button { min-height: 42px; border-radius: 10px; font-weight: 600; }
+[data-testid="stHorizontalBlock"] { gap: 0.7rem; }
+.nv-dashboard-card { border: 1px solid rgba(128,128,128,.25); border-radius: 16px; padding: 14px; height: 100%; }
+.nv-dashboard-title { font-size: 1.05rem; font-weight: 700; margin-bottom: 4px; }
+@media (max-width: 768px) {
+  .block-container { padding: .65rem .65rem 3.5rem; }
+  h1 { font-size: 1.65rem !important; }
+  [data-testid="stHorizontalBlock"] { flex-wrap: wrap; gap: .5rem; }
+  [data-testid="column"] { min-width: min(100%, 230px) !important; flex: 1 1 100% !important; }
+  .stButton > button { width: 100%; min-height: 44px; }
+}
+</style>
+""", unsafe_allow_html=True)
 
 
 def embed_html(markup, height):
@@ -759,7 +711,7 @@ def _llm_cached(system, messages_json, max_tokens, search=False):
 def llm(system, messages, max_tokens=700, search=False):
     """Returns text, or None when AI is off / busy / call failed. Retries without web search if search fails."""
     if not ai_on():
-        st.session_state.ai_err = "GEMINI_API_KEY (or ANTHROPIC_API_KEY) is not set in Streamlit Secrets"
+        st.session_state.ai_err = "No AI provider key is configured. Add GROQ_API_KEY or GEMINI_API_KEY in Streamlit Secrets."
         return None
     if not ai_allowed():
         st.session_state.ai_err = "daily fair-use limit reached"
@@ -1918,7 +1870,7 @@ def privacy_md():
 - We **do not sell, rent or share** your data and there are **no ads**.
 
 #### Services that receive some text to do their job
-- **Google Gemini** (AI helper): the article text or the question you type to Newsie.
+- The configured AI provider (Google Gemini, Groq, or Anthropic/Claude): the question you type to Newsie and any relevant context.
 - **Google Translate and Google text-to-speech**: the text being translated or read aloud.
 - **News publishers** (BBC, The Hindu and others): we only read their public feeds. Nothing about you is sent.
 - **Free dictionary service**: the word you look up.
@@ -2058,13 +2010,12 @@ def login_chars(height=430):
 
 
 def sidebar():
-    """Settings live here, always visible: profile, Kids Mode, language, text size, log out."""
+    """Compact navigation and personal settings; status and help live on the dashboard."""
     u = st.session_state.get("user")
     guest = st.session_state.get("guest")
     with st.sidebar:
         st.markdown(f'<div class="nv-side-brand">📰 <b>{esc(APP_NAME)}</b></div>', unsafe_allow_html=True)
-        st.caption("Your learning and news workspace")
-        # Quick navigation stays available on both narrow and wide screens.
+        st.caption("Smarter News. Brighter Future.")
         for nav_label, nav_page in [
             ("📰 News", "📰 News"), ("💬 Ask Newsie", "💬 Ask Newsie"),
             ("🧭 My Space", "🧭 My Space"), ("⭐ Rate us", "⭐ Rate us"),
@@ -2088,9 +2039,6 @@ def sidebar():
             else:
                 st.caption(f"{row['xp']} XP · top level!")
             st.caption(f"🔥 {row['streak']}-day streak")
-        elif guest:
-            st.caption("👤 Exploring as guest")
-        st.toggle("🧸 Kids Mode (safe stories, simple words)", key="kids")
         st.selectbox("🌐 Translate summaries to", list(LANGS), key="lang")
         st.selectbox("🔠 Text size", TEXT_SIZES, key="tsize")
         try:
@@ -2105,16 +2053,6 @@ def sidebar():
             if st.button("Log out" if u else "Exit guest mode", key="side_logout", width="stretch"):
                 do_logout()
                 st.rerun()
-        with st.expander("🔧 Check connections"):
-            st.caption("Shows which parts (news, translation, AI, voice) are working.")
-            if st.button("Run check", key="hc_btn"):
-                with st.spinner("Checking..."):
-                    st.session_state.hc = health_check()
-            for name, ok, detail in st.session_state.get("hc", []):
-                st.markdown(f"{ok} **{name}**  \n<small>{esc(detail)}</small>", unsafe_allow_html=True)
-        st.divider()
-        st.caption("Credibility and sentiment are quick hints, not facts. Always open the source.")
-        st.caption(f"App version: {APP_VERSION}")
 
 
 def auth_screen():
@@ -2441,9 +2379,11 @@ def keyword_answer(question):
     if best and score >= 2 and score >= 0.5 * len(words):
         return (f"I found a related story in today's news:\n\n**{best['title']}**\n\n{short_summary(best, 300)}")
     err = st.session_state.get("ai_err") or ""
-    if "429" in err:
-        return ("🦉 Newsie's free AI quota is used up for the moment (a Google limit). "
-                "Please try again in a minute or two. The news, translation and dictionary still work.")
+    if "429" in err or "quota" in err.lower() or "rate limit" in err.lower():
+        return ("🦉 Newsie's AI provider has reached a usage limit. "
+                "If another provider is configured, Newsie will try it automatically. "
+                "Otherwise, try again after the provider's limit resets. "
+                "News, translation and dictionary remain available.")
     why = f" (technical reason: {err})" if err else ""
     return ("🦉 I couldn't reach my AI brain just now, so I won't guess. Please ask again in a few seconds. "
             "For official rules, dates and results, also check the government or organisation's own website." + why)
@@ -2993,6 +2933,42 @@ def health_check():
     return rows
 
 
+
+def dashboard_controls():
+    """Show account status, Kids Mode, connection checks and app notes in the main page."""
+    user = st.session_state.get("user")
+    guest = st.session_state.get("guest")
+    with st.container(border=True):
+        left, right = st.columns([3, 1])
+        with left:
+            st.markdown("### 🦉 NewsieNest")
+            st.caption("Smarter News. Brighter Future. · Your learning and news workspace")
+            if user:
+                st.caption(f"👤 Signed in as {user.get('name', 'reader')}")
+            elif guest:
+                st.caption("👤 Exploring as guest · You can use the main features without signing up")
+            st.toggle("🧸 Kids Mode — safe stories and simple words", key="kids")
+        with right:
+            mascot_path = Path(__file__).parent / "assets" / "newsie_mascot.png"
+            if mascot_path.is_file():
+                st.image(str(mascot_path), width=105)
+            else:
+                st.markdown("<div style='font-size:3.2rem;text-align:center'>🦉</div>", unsafe_allow_html=True)
+        with st.expander("🔧 Check connections", expanded=False):
+            st.caption("Check news, translation, AI, database and voice services.")
+            if st.button("Run connection check", key="dashboard_health_check", width="stretch"):
+                with st.spinner("Checking services..."):
+                    st.session_state.hc = health_check()
+            results = st.session_state.get("hc", [])
+            if results:
+                for name, ok, detail in results:
+                    st.markdown(f"{ok} **{name}** · {esc(detail)}")
+            else:
+                st.caption("Run the check to see service status.")
+        st.caption("Credibility and sentiment are quick hints, not facts. Always open the original source.")
+        st.caption(f"App version: {APP_VERSION}")
+
+
 def main():
     try:
         init_db(cfg("DATABASE_URL"))
@@ -3030,8 +3006,11 @@ def main():
         auth_screen()
         footer()
         return
+    dashboard_controls()
     pages = ["📰 News", "💬 Ask Newsie", "🧭 My Space", "⭐ Rate us", "🔒 Privacy"] + (["🛡️ Owner"] if is_admin() else [])
-    choice = st.segmented_control("Menu", pages, default=pages[0], key="nav", label_visibility="collapsed") or pages[0]
+    if st.session_state.get("nav") not in pages:
+        st.session_state["nav"] = "📰 News"
+    choice = st.segmented_control("Choose a section", pages, default=st.session_state.get("nav", "📰 News"), key="nav", label_visibility="collapsed") or "📰 News"
     if st.session_state.get("last_page") != choice:
         st.session_state.last_page = choice
         log("page", choice)
