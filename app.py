@@ -2368,26 +2368,70 @@ STOPWORDS = set("what when where which whom whose about with from that this thes
                 "tell please explain give show need know want make made rules rule".split())
 
 
+def offline_topic_answer(question, style="auto"):
+    """Useful no-AI responses for common India education/exam queries."""
+    q = re.sub(r"\s+", " ", str(question or "").lower()).strip()
+    is_vao = any(term in q for term in ("vao", "village administrative officer")) and any(
+        term in q for term in ("rpc", "result", "2026", "score", "merit")
+    )
+    is_upsc = any(term in q for term in ("upsc", "civil services exam", "ias exam"))
+
+    if is_vao:
+        base = (
+            "**VAO / RPC Result 2026**\n\n"
+            "If you mean the Karnataka Village Administrative Officer recruitment, check the latest dated notice and result/score list on the **Karnataka Examinations Authority (KEA)** official website: "
+            "https://cetonline.karnataka.gov.in/kea/\n\n"
+            "Open the recruitment or VAO section and look for the result/score list PDF. Check the exam name, notification number, publication date and whether the document says *provisional* or *final*. I can't confirm the live status from this offline answer, so I won't guess whether a particular list has been released."
+        )
+        panels = [
+            {"speaker":"Kiki","emoji":"📋🤔","text":"Newsie, someone searched for the VAO RPC Result 2026. Where should they look first?","action":"think","motion":"float"},
+            {"speaker":"Newsie","emoji":"🦉🔎","text":"Start with the Karnataka Examinations Authority website and open the official VAO recruitment section.","action":"point","motion":"zoom"},
+            {"speaker":"Kiki","emoji":"📄","text":"What should I check in the result PDF? Make sure the exam name and notification number match your recruitment.","action":"think","motion":"spin"},
+            {"speaker":"Newsie","emoji":"📅✅","text":"Read the publication date and see whether it is a provisional score list or a final list. Those are not always the same thing.","action":"point","motion":"zoom"},
+            {"speaker":"Kiki","emoji":"🌐","text":"And if a result notice is already published, we should use that notice instead of saying it is still pending.","action":"cheer","motion":"float"},
+            {"speaker":"Newsie","emoji":"🦉📌","text":"Official KEA portal: https://cetonline.karnataka.gov.in/kea/ . I won't invent a live status when I can't check the notice directly.","action":"wave","motion":"zoom"}
+        ]
+        game = ("🎮 **VAO result-check challenge**\n\n1. Which source should you trust first?\nA) An official KEA notice  B) A random forwarded message  C) An undated screenshot\n\n2. What should you check on the PDF?\nA) Only its colour  B) Exam name and notification number  C) Nothing\n\n3. Is a provisional score list always the final selection list?\nA) Yes  B) No  C) Not sure\n\n###ANSWERS###\n1. A — the official notice is the primary source.\n2. B — match the recruitment details.\n3. B — provisional and final lists can differ.")
+    elif is_upsc:
+        base = (
+            "**What is UPSC?**\n\nUPSC stands for **Union Public Service Commission**. It conducts several central government recruitment examinations, including the Civil Services Examination for services such as IAS, IPS and Indian Foreign Service.\n\nFor the Civil Services Examination, the usual stages are **Prelims**, **Mains**, and the **Personality Test (interview)**. For current dates, eligibility and notifications, use the official UPSC website: https://upsc.gov.in/ ."
+        )
+        panels = [
+            {"speaker":"Kiki","emoji":"🏛️🤔","text":"Newsie, what does UPSC mean, and why do students prepare for its exams?","action":"think","motion":"float"},
+            {"speaker":"Newsie","emoji":"🦉📚","text":"UPSC means Union Public Service Commission. It conducts recruitment exams for several important central government services.","action":"point","motion":"zoom"},
+            {"speaker":"Kiki","emoji":"📝","text":"For the Civil Services Examination, what are the main stages a candidate should learn about?","action":"think","motion":"spin"},
+            {"speaker":"Newsie","emoji":"📖","text":"The usual stages are Preliminary Examination, Main Examination, and the Personality Test, commonly called the interview.","action":"point","motion":"zoom"},
+            {"speaker":"Kiki","emoji":"🔎","text":"Where do we check the latest dates and eligibility? We should use the official UPSC notification, not rumours.","action":"cheer","motion":"float"},
+            {"speaker":"Newsie","emoji":"🇮🇳✅","text":"Visit https://upsc.gov.in/ and read the notification for the exam and year you are interested in.","action":"wave","motion":"zoom"}
+        ]
+        game = ("🎮 **UPSC quick quiz!**\n\n1. What does UPSC stand for?\nA) United Public Service Council  B) Union Public Service Commission  C) Universal Police Service Cell\n\n2. Which is a Civil Services Examination stage?\nA) Prelims  B) Driving race  C) Cooking test\n\n3. Where should you check official notifications?\nA) Random social post  B) Official UPSC website  C) Unverified forward\n\n###ANSWERS###\n1. B — Union Public Service Commission.\n2. A — Prelims is the first stage.\n3. B — official notifications are the reliable reference.")
+    else:
+        return None
+
+    if style == "cartoon":
+        return {"content": "🎭 Here's Newsie's offline cartoon explanation!", "panels": prepare_panels(panels)}
+    if style == "game":
+        heading, _, answers = game.partition("###ANSWERS###")
+        return {"content": heading.strip(), "answers": answers.strip()}
+    return {"content": base}
+
+
 def keyword_answer(question):
-    """Offline fallback. Only shows a story when it really matches the question; never a random headline."""
+    """Offline fallback: answer common topics or show a genuinely related story."""
+    topic = offline_topic_answer(question, "real")
+    if topic:
+        return topic["content"]
     words = {w for w in re.findall(r"[a-z]{4,}", question.lower())} - STOPWORDS
     best, score = None, 0
     for a in st.session_state.get("articles", []):
         sc = len(words & set(re.findall(r"[a-z]{4,}", (a["title"] + " " + a["text"]).lower())))
         if sc > score:
             best, score = a, sc
-    if best and score >= 2 and score >= 0.5 * len(words):
-        return (f"I found a related story in today's news:\n\n**{best['title']}**\n\n{short_summary(best, 300)}")
-    err = st.session_state.get("ai_err") or ""
-    if "429" in err or "quota" in err.lower() or "rate limit" in err.lower():
-        return ("🦉 Newsie couldn't get an answer from the configured AI services. Check the provider error in "
-                "the app's connection diagnostics, then verify the API key, model name, billing/quota and rate limits "
-                "in that provider's dashboard. Add a valid key for a second provider in Streamlit Cloud → Settings → "
-                "Secrets to enable fallback (GROQ_API_KEY, GEMINI_API_KEY, or ANTHROPIC_API_KEY). "
-                "A key name alone does not grant usage. News, translation and dictionary remain available.")
-    why = f" (technical reason: {err})" if err else ""
-    return ("🦉 I couldn't reach my AI brain just now, so I won't guess. Please ask again in a few seconds. "
-            "For official rules, dates and results, also check the government or organisation's own website." + why)
+    if best and score >= 2 and score >= 0.5 * max(1, len(words)):
+        return f"I found a related story in today's news:\n\n**{best['title']}**\n\n{short_summary(best, 300)}"
+    return ("🦉 I can't reach the AI helper right now, but you can still explore news and learning topics. "
+            "Try a specific question, or check the official website for current results, dates and rules. "
+            "I won't invent facts I can't verify.")
 
 
 CHAT_KEYS = {"✨ Auto": "auto", "🎭 Cartoon": "cartoon", "🌍 Real life": "real", "🎮 Game": "game"}
@@ -2599,6 +2643,11 @@ def newsie_answer(question, style):
             definition = define(word)
             if definition:
                 return {"content": definition}
+
+    # Serve reliable built-in help for common exam queries even if AI providers are down.
+    offline = offline_topic_answer(question, style)
+    if offline:
+        return offline
 
     # Allow Groq even if ai_enabled() only checks your previous providers.
     if not ai_enabled() and not _newsie_groq_key():
