@@ -2405,6 +2405,30 @@ def offline_topic_answer(question, style="auto"):
             {"speaker":"Newsie","emoji":"🇮🇳✅","text":"Visit https://upsc.gov.in/ and read the notification for the exam and year you are interested in.","action":"wave","motion":"zoom"}
         ]
         game = ("🎮 **UPSC quick quiz!**\n\n1. What does UPSC stand for?\nA) United Public Service Council  B) Union Public Service Commission  C) Universal Police Service Cell\n\n2. Which is a Civil Services Examination stage?\nA) Prelims  B) Driving race  C) Cooking test\n\n3. Where should you check official notifications?\nA) Random social post  B) Official UPSC website  C) Unverified forward\n\n###ANSWERS###\n1. B — Union Public Service Commission.\n2. A — Prelims is the first stage.\n3. B — official notifications are the reliable reference.")
+    elif any(term in q for term in ("karnataka state bird", "state bird of karnataka", "karnataka bird", "state bird")):
+        base = ("**Karnataka's state bird is the Indian roller** (also called the blue jay in some local usage; Kannada: ನೀಲಕಂಠ / Neelakanta). "
+                "It is known for its bright blue wings, especially noticeable when it flies.")
+        panels = [
+            {"speaker":"Kiki","emoji":"🐦🤔","text":"Newsie, which bird represents Karnataka?","action":"think","motion":"float"},
+            {"speaker":"Newsie","emoji":"🦉💙","text":"Karnataka's state bird is the Indian roller, a colourful bird with bright blue wings.","action":"point","motion":"zoom"},
+            {"speaker":"Kiki","emoji":"🪽✨","text":"Why do people notice it so easily? Its blue wings look especially vivid when it takes flight.","action":"cheer","motion":"float"}
+        ]
+        game = ("🎮 **Bird quiz!**\n\nWhat is Karnataka's state bird?\nA) Indian roller\nB) Peacock\nC) Parrot\n\n###ANSWERS###\nA) Indian roller — Karnataka's state bird.")
+    elif ("karnataka" in q or "ಕರ್ನಾಟಕ" in q) and any(term in q for term in ("exam", "exams", "apply", "government job", "recruitment", "eligible", "eligibility", "ಅರ್ಜಿ", "ಪರೀಕ್ಷೆ")):
+        base = ("**Karnataka government exams students can apply for**\n\n"
+                "Options depend on your age, education, category and the current notification. Common routes include:\n\n"
+                "- **KPSC** — state civil-service and departmental posts: https://kpsc.kar.nic.in/\n"
+                "- **KEA** — recruitment/exam notices handled by KEA: https://cetonline.karnataka.gov.in/kea/\n"
+                "- **Karnataka Police** — constable and sub-inspector recruitment when notified: https://ksp.karnataka.gov.in/\n"
+                "- **Karnataka Examination Authority / department recruitment notices** — always check the exact notification and application dates.\n\n"
+                "Before applying, verify the post, required qualification, age limit, reservation rules, fee, last date and official application link. I can't determine which posts you personally qualify for without your education level and age, and current vacancies must be checked in the latest official notifications.")
+        panels = [
+            {"speaker":"Kiki","emoji":"🎓🤔","text":"I want a Karnataka government job. Where should I start looking for exams?","action":"think","motion":"float"},
+            {"speaker":"Newsie","emoji":"🦉📋","text":"Start with official recruitment notices from KPSC, KEA and Karnataka Police, depending on the type of post.","action":"point","motion":"zoom"},
+            {"speaker":"Kiki","emoji":"🧾🔎","text":"Can everyone apply for every post? No—education, age and other rules differ by notification.","action":"think","motion":"spin"},
+            {"speaker":"Newsie","emoji":"✅📅","text":"Check the official notice for eligibility, dates, fees and the application link before applying.","action":"wave","motion":"zoom"}
+        ]
+        game = ("🎮 **Government exam checklist quiz**\n\n1. Where should you verify eligibility? A) Official notification B) Rumour C) Old screenshot\n\n2. Which details matter? A) Age and qualification B) Only the poster colour C) Nothing\n\n###ANSWERS###\n1. A — use the official notification.\n2. A — eligibility depends on the post.")
     else:
         return None
 
