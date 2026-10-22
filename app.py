@@ -2097,32 +2097,42 @@ def auth_screen():
                     else:
                         st.error(res)
         with t3:
-            st.markdown("**Forgot your password? Two quick steps.**")
-            if smtp_ready():
-                st.markdown("**Step 1.** Type your email and press the button. We email you a 6-digit code.")
-                with st.form("fp_req"):
-                    fe = st.text_input("Your account email", key="fp_e")
-                    if st.form_submit_button("Email me a reset code", width="stretch"):
-                        code = create_reset(fe)
+            st.markdown("**Forgot your password? Reset it by email.**")
+            st.markdown(
+                "1. Enter the email address linked to your NewsieNest account.\n"
+                "2. Press **Send reset code**. A 6-digit code will be emailed to you.\n"
+                "3. Enter that code and your new password below. The code expires after 30 minutes.")
+            if not smtp_ready():
+                st.warning(
+                    "Automatic password-reset email is not configured yet. The site owner must add "
+                    "SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD and (optionally) SMTP_FROM "
+                    "in Streamlit Cloud → App settings → Secrets. Until that is configured, email codes cannot be sent.")
+            with st.form("fp_req"):
+                fe = st.text_input("Your account email", key="fp_e")
+                if st.form_submit_button("Send reset code", width="stretch", disabled=not smtp_ready()):
+                    email_norm = fe.strip().lower()
+                    if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", email_norm):
+                        st.error("Enter a valid email address.")
+                    else:
+                        code = create_reset(email_norm)
                         try:
                             if code:
-                                send_email(fe.strip().lower(), f"{APP_NAME} password reset code",
-                                           f"Your {APP_NAME} reset code is {code}. It works for 30 minutes.\n"
-                                           "If you did not ask for this, ignore this email.")
-                            st.success("If that email is registered, a code is on its way (valid 30 minutes). Check spam too.")
+                                send_email(email_norm, f"{APP_NAME} password reset code",
+                                           f"Your {APP_NAME} password reset code is: {code}\n\n"
+                                           "This code expires in 30 minutes and can only be used once.\n"
+                                           "If you did not request a password reset, you can ignore this email.")
+                            # Keep the response generic so account existence is not disclosed.
+                            st.success("If an account exists for that email, a reset code has been sent. Check your inbox and spam folder.")
                         except Exception:
-                            st.error("We couldn't send the reset email. The code may have been created but was not delivered. Request a fresh code after email delivery is fixed, or contact the site owner for a reset code.")
-            else:
-                st.markdown(
-                    f"**Step 1. Get your code.**\n\n"
-                    f"- **Site owner:** your code is the secret `OWNER_RESET_KEY` you saved in Streamlit Secrets.\n"
-                    f"- **Everyone else:** email **{esc(contact_email())}** and the owner will send you a 6-digit code.")
-            st.markdown("**Step 2.** Enter your email, the code and a new password.")
+                            # Remove the undelivered code so it cannot leave a confusing active reset.
+                            x("DELETE FROM resets WHERE email=?", (email_norm,))
+                            st.error("We couldn't send the email. Please try again later or contact the site owner.")
+            st.markdown("**Step 2. Set your new password**")
             with st.form("fp_set"):
                 e2 = st.text_input("Account email", key="fp_e2")
-                code2 = st.text_input("Reset code", key="fp_c", max_chars=64)
+                code2 = st.text_input("6-digit reset code", key="fp_c", max_chars=6)
                 np_ = st.text_input("New password (8+ characters, letters and numbers)", type="password", key="fp_p")
-                if st.form_submit_button("Set new password", type="primary", width="stretch"):
+                if st.form_submit_button("Reset password", type="primary", width="stretch"):
                     ok, msg = finish_reset(e2, code2, np_)
                     (st.success if ok else st.error)(msg)
         with t4:
