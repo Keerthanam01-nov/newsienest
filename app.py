@@ -144,7 +144,7 @@ DEMO_ARTICLES = [
 ]
 
 st.set_page_config(page_title=f"{APP_NAME} - understand the news", page_icon="📰",
-                   layout="wide", initial_sidebar_state="expanded")
+                   layout="wide", initial_sidebar_state="collapsed")
 
 # Responsive styling: safe on desktop and mobile.
 st.markdown("""
@@ -1658,8 +1658,8 @@ html,body,.stApp,[data-testid="stMarkdownContainer"],input,textarea,button,label
 .stApp{background:linear-gradient(180deg,#1B1750 0,#0E1020 480px)!important}
 .block-container{max-width:1180px;padding:1rem 1.2rem 4rem}
 [data-testid="stHeader"]{background:transparent!important}
-[data-testid="stSidebar"],[data-testid="stSidebar"]>div{background:#12142A!important}
-[data-testid="stSidebar"]{border-right:1px solid var(--line)}
+[data-testid="stSidebar"],[data-testid="stSidebar"]>div{display:none!important;width:0!important;min-width:0!important}
+[data-testid="stSidebarCollapsedControl"]{display:none!important}
 .stApp ::placeholder{color:#8B90B8!important;opacity:1!important}
 .stApp h1,.stApp h2,.stApp h3,.stApp h4{font-weight:800;letter-spacing:-.01em}
 [data-testid="stForm"]{border:1px solid var(--line)!important;border-radius:16px!important;background:#12142A}
@@ -2380,10 +2380,11 @@ def keyword_answer(question):
         return (f"I found a related story in today's news:\n\n**{best['title']}**\n\n{short_summary(best, 300)}")
     err = st.session_state.get("ai_err") or ""
     if "429" in err or "quota" in err.lower() or "rate limit" in err.lower():
-        return ("🦉 Newsie's AI provider has reached a usage limit. "
-                "If another provider is configured, Newsie will try it automatically. "
-                "Otherwise, try again after the provider's limit resets. "
-                "News, translation and dictionary remain available.")
+        return ("🦉 Newsie's AI services are temporarily out of quota. I tried the configured provider fallback, "
+                "but none returned an answer. To restore chat, add or renew a provider key in Streamlit Cloud → "
+                "App settings → Secrets (GROQ_API_KEY, GEMINI_API_KEY, or ANTHROPIC_API_KEY), and make sure "
+                "that provider still has available quota. A key name alone does not provide free usage. "
+                "News, translation and dictionary remain available while AI is unavailable.")
     why = f" (technical reason: {err})" if err else ""
     return ("🦉 I couldn't reach my AI brain just now, so I won't guess. Please ask again in a few seconds. "
             "For official rules, dates and results, also check the government or organisation's own website." + why)
@@ -2942,7 +2943,7 @@ def dashboard_controls():
         left, right = st.columns([3, 1])
         with left:
             st.markdown("### 🦉 NewsieNest")
-            st.caption("Smarter News. Brighter Future. · Your learning and news workspace")
+            st.caption("Your brighter, calmer space for understanding what is happening in the world.")
             if user:
                 st.caption(f"👤 Signed in as {user.get('name', 'reader')}")
             elif guest:
@@ -2954,6 +2955,32 @@ def dashboard_controls():
                 st.image(str(mascot_path), width=105)
             else:
                 st.markdown("<div style='font-size:3.2rem;text-align:center'>🦉</div>", unsafe_allow_html=True)
+        st.markdown("---")
+        st.markdown("**✨ Make Newsie yours**")
+        setting_lang, setting_size = st.columns([1.5, 1])
+        with setting_lang:
+            st.selectbox("🌐 Translate summaries to", list(LANGS), key="lang")
+        with setting_size:
+            st.selectbox("🔠 Reading size", TEXT_SIZES, key="tsize")
+        try:
+            code = LANGS[st.session_state.lang][0]
+            if st.query_params.get("l") != code:
+                st.query_params["l"] = code
+            if st.query_params.get("z") != st.session_state.tsize:
+                st.query_params["z"] = st.session_state.tsize
+        except Exception:
+            pass
+        if user:
+            try:
+                row = q("SELECT xp,streak FROM users WHERE id=?", (user["id"],))[0]
+                (lo, name, icon), nxt = level_of(row["xp"])
+                st.caption(f"{icon} **{name}** · {row['xp']} XP · 🔥 {row['streak']}-day streak")
+            except Exception:
+                pass
+        if user or guest:
+            if st.button("↪ Log out" if user else "↪ Exit guest mode", key="dashboard_logout", width="stretch"):
+                do_logout()
+                st.rerun()
         with st.expander("🔧 Check connections", expanded=False):
             st.caption("Check news, translation, AI, database and voice services.")
             if st.button("Run connection check", key="dashboard_health_check", width="stretch"):
@@ -2965,8 +2992,8 @@ def dashboard_controls():
                     st.markdown(f"{ok} **{name}** · {esc(detail)}")
             else:
                 st.caption("Run the check to see service status.")
-        st.caption("Credibility and sentiment are quick hints, not facts. Always open the original source.")
-        st.caption(f"App version: {APP_VERSION}")
+        st.caption("🛡️ Credibility and sentiment are quick hints, not facts. Always open the original source.")
+        st.caption(f"NewsieNest · {APP_VERSION}")
 
 
 def main():
@@ -2991,7 +3018,6 @@ def main():
     if "visit_logged" not in st.session_state:
         st.session_state.visit_logged = True
         log("visit")
-    sidebar()
     user, guest = st.session_state.get("user"), st.session_state.get("guest")
     tok = st.query_params.get("s")
     if user and tok and not st.session_state.get("ls_saved"):
