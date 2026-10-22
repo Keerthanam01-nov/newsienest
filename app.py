@@ -2370,17 +2370,40 @@ STOPWORDS = set("what when where which whom whose about with from that this thes
 
 def offline_topic_answer(question, style="auto"):
     """Useful no-AI responses for common India education/exam queries."""
-    q = re.sub(r"\s+", " ", str(question or "").lower()).strip()
-    # Be forgiving of short queries and common typing mistakes (e.g. "ao rpc").
-    is_vao = any(term in q for term in ("vao", "village administrative officer", "ao rpc", "vao rpc"))
-    asks_vao_result = any(term in q for term in ("rpc", "result", "2026", "score", "merit", "cutoff", "cut off", "selection list"))
+    raw_q = str(question or "").lower().strip()
+    # Normalize punctuation/slashes so variants like "email v/s gmail" match too.
+    q = re.sub(r"[^a-z0-9@.+#\s]", " ", raw_q)
+    q = re.sub(r"\s+", " ", q).strip()
+    # Correct frequent chat typos before intent matching.
+    q = re.sub(r"\bemai\b", "email", q)
+    q = re.sub(r"\bema i\b", "email", q)
+    # Match VAO as a standalone term, so unrelated questions never inherit the result answer.
+    # Accept common shorthand/typos such as "ao rpc" and "vao rpc".
+    is_vao = bool(re.search(r"\bvao\b|\bv\s*a\s*o\b|village administrative officer|\bao\s+rpc\b", q))
+    asks_vao_result = is_vao and any(term in q for term in ("rpc", "result", "2026", "score", "merit", "cutoff", "cut off", "selection list", "rank list"))
     is_upsc = any(term in q for term in ("upsc", "civil services exam", "ias exam"))
     asks_to_write = any(term in q for term in ("how to write", "write a", "write an", "format of", "email format", "mail format"))
     asks_mail = any(term in q for term in ("mail", "email", "e-mail", "main", "leave letter", "application letter"))
     asks_gmail_meaning = any(term in q for term in ("gmail stands for", "full form of gmail", "gmail full form", "what is gmail", "meaning of gmail"))
-    asks_gmail_vs_email = any(term in q for term in ("gmail vs email", "gmail and email", "difference between gmail and email", "difference of gmail and email", "gmail or email"))
+    has_gmail = "gmail" in q or "g mail" in q
+    has_email = any(term in q for term in ("email", "e mail", "mail"))
+    asks_comparison = any(term in q for term in ("vs", "v s", "versus", "difference", "compare", "or"))
+    # Support both directions and common punctuation/spacing variants: Gmail vs email, email v/s Gmail.
+    asks_gmail_vs_email = has_gmail and has_email and (asks_comparison or "gmail email" in q or "email gmail" in q)
+    asks_newsienest_site = any(term in q for term in ("newsie website", "newsienest website", "newsie nest website", "what is newsie nest", "what is newsienest", "newsie site"))
 
-    if asks_gmail_meaning:
+    if asks_newsienest_site:
+        base = ("**NewsieNest website**\n\n"
+                "NewsieNest is a learning and news helper designed to explain topics in simple language. You can ask questions, explore news, use learning tools such as dictionary/translation features, and choose answer styles such as real-life explanations, cartoons, or games when those features are enabled.\n\n"
+                "If the chatbot shows an AI-unavailable message, it means the configured AI service may be unavailable or not configured correctly; built-in offline answers cover only selected topics. This does not mean your question is about exam results.")
+        panels = [
+            {"speaker":"Kiki","emoji":"🌐🤔","text":"What can I do on NewsieNest?","action":"think","motion":"float"},
+            {"speaker":"Newsie","emoji":"🦉📚","text":"You can explore news and learning topics, ask questions, and use available language and dictionary tools.","action":"point","motion":"zoom"},
+            {"speaker":"Kiki","emoji":"🛠️","text":"What if the AI helper is offline?","action":"think","motion":"spin"},
+            {"speaker":"Newsie","emoji":"✅🌐","text":"Some built-in answers still work, but broader questions need a working AI provider.","action":"cheer","motion":"float"}
+        ]
+        game = ("🎮 **NewsieNest quiz**\n\nWhat is NewsieNest meant to help with?\nA) News and learning\nB) Only exam results\nC) Only email\n\n###ANSWERS###\nA) News and learning.")
+    elif asks_gmail_meaning:
         base = ("**What does Gmail stand for?**\n\n"
                 "Gmail was originally short for **Google Mail**. Today, **Gmail** is the name of Google's email service.\n\n"
                 "An email address on Gmail usually looks like `yourname@gmail.com`.")
@@ -2422,6 +2445,16 @@ def offline_topic_answer(question, style="auto"):
             {"speaker":"Newsie","emoji":"✅✉️","text":"Thank the reader, close politely with Regards, and add your name. Check spelling before sending.","action":"wave","motion":"zoom"}
         ]
         game = ("🎮 **Email-writing mini quiz**\n\n1. What should the subject line do? A) Explain the purpose briefly B) Be left blank always C) Tell a joke\n\n2. What belongs at the end? A) Your name B) A random password C) Nothing\n\n###ANSWERS###\n1. A — a clear subject helps the reader understand the email.\n2. A — close politely and include your name.")
+    elif any(term in q for term in ("how to write email", "how to write a email", "how to write mail", "write email", "write a mail", "email format", "mail format")):
+        base = ("**How to write an email**\n\n"
+                "**To:** recipient's email address\n\n**Subject:** a short description of your purpose\n\n"
+                "Dear [Name],\n\nI am writing to [state your reason clearly]. [Add the important details in 2–4 sentences.]\n\n"
+                "Thank you for your time.\n\nRegards,\n[Your Name]")
+        panels = [
+            {"speaker":"Kiki","emoji":"✉️🤔","text":"What are the parts of a good email?","action":"think","motion":"float"},
+            {"speaker":"Newsie","emoji":"🦉📋","text":"Use a clear subject, greeting, short message, polite closing and your name.","action":"point","motion":"zoom"}
+        ]
+        game = ("🎮 **Email mini quiz**\n\nWhat does the subject line do?\nA) Summarizes the purpose\nB) Replaces the message\nC) Shows your password\n\n###ANSWERS###\nA) It briefly explains the email's purpose.")
     elif is_vao:
         if asks_vao_result:
             base = (
@@ -2772,14 +2805,14 @@ def newsie_answer(question, style):
         safe_q = q[:220] if q else "this topic"
         local_panels = [
             {"speaker": "Kiki", "emoji": "🤔📣", "text": f"Newsie, can you explain this clearly: {safe_q}?", "action": "think", "motion": "float"},
-            {"speaker": "Newsie", "emoji": "🦉📘", "text": f"Let's start with the main point: {safe_q}. We'll separate confirmed facts from anything that still needs checking.", "action": "point", "motion": "zoom"},
-            {"speaker": "Kiki", "emoji": "🔎🧩", "text": "How do we know the details are correct? We should look for a dated notice or update from the official source.", "action": "think", "motion": "spin"},
-            {"speaker": "Newsie", "emoji": "📄✅", "text": "If an official result or notice has already been published, use that published notice. I won't call it pending without evidence.", "action": "cheer", "motion": "zoom"},
-            {"speaker": "Kiki", "emoji": "💡", "text": "So we should check the exact department, exam, or scheme portal and its latest dated announcement—not rely on a guess!", "action": "point", "motion": "float"},
-            {"speaker": "Newsie", "emoji": "👋🎉", "text": "Remember: confirmed facts first, official source next, and no guessing about result dates. Stay curious!", "action": "wave", "motion": "zoom"}
+            {"speaker": "Newsie", "emoji": "🦉📘", "text": f"Let's focus on your question: {safe_q}. I'll explain what I can, and be clear if something needs checking.", "action": "point", "motion": "zoom"},
+            {"speaker": "Kiki", "emoji": "🔎🧩", "text": "Can we make the answer useful and specific instead of changing the topic?", "action": "think", "motion": "spin"},
+            {"speaker": "Newsie", "emoji": "📚✅", "text": "Yes. A working AI connection helps with unfamiliar questions; offline answers only cover selected topics.", "action": "cheer", "motion": "zoom"},
+            {"speaker": "Kiki", "emoji": "💡", "text": "So the answer should match the words I asked about, not automatically become an exam-result answer!", "action": "point", "motion": "float"},
+            {"speaker": "Newsie", "emoji": "👋🎉", "text": "Exactly. Ask one clear question, and we'll use the best available answer source for that topic.", "action": "wave", "motion": "zoom"}
         ]
         st.session_state.ai_err = st.session_state.get("ai_err") or "AI unavailable; showing offline cartoon fallback."
-        return {"content": "🎭 AI is temporarily unavailable, so here's a safe offline cartoon. For a specific result status, check the latest official notice.", "panels": prepare_panels(local_panels)}
+        return {"content": f"🎭 AI is temporarily unavailable, so here's an offline explanation related to: **{safe_q}**. Some details may need a working AI provider.", "panels": prepare_panels(local_panels)}
 
     if style == "game":
         prompt = (
