@@ -2371,18 +2371,24 @@ STOPWORDS = set("what when where which whom whose about with from that this thes
 def offline_topic_answer(question, style="auto"):
     """Useful no-AI responses for common India education/exam queries."""
     q = re.sub(r"\s+", " ", str(question or "").lower()).strip()
-    is_vao = any(term in q for term in ("vao", "village administrative officer")) and any(
-        term in q for term in ("rpc", "result", "2026", "score", "merit")
-    )
+    is_vao = any(term in q for term in ("vao", "village administrative officer"))
+    asks_vao_result = any(term in q for term in ("rpc", "result", "2026", "score", "merit", "cutoff", "cut off", "selection list"))
     is_upsc = any(term in q for term in ("upsc", "civil services exam", "ias exam"))
 
     if is_vao:
-        base = (
-            "**VAO / RPC Result 2026**\n\n"
-            "If you mean the Karnataka Village Administrative Officer recruitment, check the latest dated notice and result/score list on the **Karnataka Examinations Authority (KEA)** official website: "
-            "https://cetonline.karnataka.gov.in/kea/\n\n"
-            "Open the recruitment or VAO section and look for the result/score list PDF. Check the exam name, notification number, publication date and whether the document says *provisional* or *final*. I can't confirm the live status from this offline answer, so I won't guess whether a particular list has been released."
-        )
+        if asks_vao_result:
+            base = (
+                "**Karnataka VAO / RPC result information**\n\n"
+                "For the Village Administrative Officer (VAO) recruitment, check the latest dated result or score-list notice on the **Karnataka Examinations Authority (KEA)** official website: "
+                "https://cetonline.karnataka.gov.in/kea/\n\n"
+                "Open the relevant recruitment section and check the exam name, notification number, publication date, and whether the PDF is provisional or final. I can't verify the live result status from this offline answer, so I won't guess whether a particular list has been released."
+            )
+        else:
+            base = (
+                "**What is VAO?**\n\n"
+                "VAO stands for **Village Administrative Officer**. In Karnataka, applicants should use the official recruitment notification to confirm which department is conducting the recruitment, the required education, age limit, reservation rules, application dates and selection process. Start by checking the Karnataka Examinations Authority (KEA) portal: https://cetonline.karnataka.gov.in/kea/ .\n\n"
+                "If you meant the VAO/RPC result, score list or cutoff, ask ‘VAO result’ and I can show you how to check the official notice. I can't confirm current vacancies or result status without checking a current notice."
+            )
         panels = [
             {"speaker":"Kiki","emoji":"📋🤔","text":"Newsie, someone searched for the VAO RPC Result 2026. Where should they look first?","action":"think","motion":"float"},
             {"speaker":"Newsie","emoji":"🦉🔎","text":"Start with the Karnataka Examinations Authority website and open the official VAO recruitment section.","action":"point","motion":"zoom"},
